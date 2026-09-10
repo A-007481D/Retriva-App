@@ -15,6 +15,12 @@ import (
 	"github.com/A-007481D/retriva/server/internal/api"
 	"github.com/A-007481D/retriva/server/internal/config"
 	"github.com/A-007481D/retriva/server/internal/database"
+	"github.com/A-007481D/retriva/server/internal/downloader"
+	"github.com/A-007481D/retriva/server/internal/history"
+	"github.com/A-007481D/retriva/server/internal/jobs"
+	"github.com/A-007481D/retriva/server/internal/media"
+	"github.com/A-007481D/retriva/server/internal/resolver"
+	"github.com/A-007481D/retriva/server/internal/resolver/direct"
 	"github.com/A-007481D/retriva/server/internal/storage/filesystem"
 )
 
@@ -49,10 +55,23 @@ func run() error {
 		return fmt.Errorf("init storage: %w", err)
 	}
 
+	// Initialize repositories
+	jobsRepo := jobs.NewSQLiteRepository(db.DB)
+	mediaRepo := media.NewSQLiteRepository(db.DB)
+	historyRepo := history.NewSQLiteRepository(db.DB)
+
+	// Initialize resolver and downloader
+	resRegistry := resolver.NewRegistry(direct.New())
+	dl := downloader.NewHTTPDownloader(store, 30*time.Second, 1024*1024*1024, 5) // 1GB max
+
+	// Initialize executor and worker pool
+	exec := jobs.NewExecutor(resRegistry, dl, jobsRepo, mediaRepo, historyRepo, logger)
+	pool := jobs.NewWorkerPool(cfg.Workers, 1000, exec, logger)
+
 	// Propagate version to API handler.
 	api.Version = version
 
-	handler := api.New(logger, db, store)
+	handler := api.New(logger, db, store, jobsRepo, mediaRepo, historyRepo, pool, cfg.AuthToken)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -69,6 +88,9 @@ func run() error {
 		slog.Int("workers", cfg.Workers),
 		slog.Bool("auth_enabled", cfg.AuthToken != ""),
 	)
+
+	pool.Start()
+	logger.Info("worker pool started", slog.Int("workers", cfg.Workers))
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -92,6 +114,9 @@ func run() error {
 		if err := srv.Shutdown(ctx); err != nil {
 			return fmt.Errorf("graceful shutdown failed: %w", err)
 		}
+		
+		pool.Stop()
+		logger.Info("worker pool stopped")
 
 		logger.Info("shutdown complete")
 		return nil

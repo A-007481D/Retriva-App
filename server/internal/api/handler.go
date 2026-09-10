@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/A-007481D/retriva/server/internal/database"
+	"github.com/A-007481D/retriva/server/internal/history"
+	"github.com/A-007481D/retriva/server/internal/jobs"
+	"github.com/A-007481D/retriva/server/internal/media"
 	"github.com/A-007481D/retriva/server/internal/storage"
 	"github.com/oklog/ulid/v2"
 )
@@ -23,19 +26,38 @@ const requestIDKey contextKey = "requestID"
 
 // Handler is the root HTTP handler. It owns the ServeMux and middleware chain.
 type Handler struct {
-	mux     *http.ServeMux
-	logger  *slog.Logger
-	db      *database.DB
-	storage storage.Storage
+	mux         *http.ServeMux
+	logger      *slog.Logger
+	db          *database.DB
+	storage     storage.Storage
+	jobsRepo    jobs.Repository
+	mediaRepo   media.Repository
+	historyRepo history.Repository
+	pool        *jobs.WorkerPool
+	authToken   string
 }
 
 // New creates a fully configured Handler with all routes registered.
-func New(logger *slog.Logger, db *database.DB, store storage.Storage) *Handler {
+func New(
+	logger *slog.Logger,
+	db *database.DB,
+	store storage.Storage,
+	jobsRepo jobs.Repository,
+	mediaRepo media.Repository,
+	historyRepo history.Repository,
+	pool *jobs.WorkerPool,
+	authToken string,
+) *Handler {
 	h := &Handler{
-		mux:     http.NewServeMux(),
-		logger:  logger,
-		db:      db,
-		storage: store,
+		mux:         http.NewServeMux(),
+		logger:      logger,
+		db:          db,
+		storage:     store,
+		jobsRepo:    jobsRepo,
+		mediaRepo:   mediaRepo,
+		historyRepo: historyRepo,
+		pool:        pool,
+		authToken:   authToken,
 	}
 	h.registerRoutes()
 	return h
@@ -50,6 +72,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) registerRoutes() {
 	h.mux.HandleFunc("GET /health", h.handleHealth)
 	h.mux.HandleFunc("GET /ready", h.handleReady)
+
+	// API v1 (Auth Protected)
+	h.mux.Handle("POST /api/v1/jobs", h.requireAuth(http.HandlerFunc(h.handleCreateJob)))
+	h.mux.Handle("GET /api/v1/jobs", h.requireAuth(http.HandlerFunc(h.handleListJobs)))
+	h.mux.Handle("GET /api/v1/history", h.requireAuth(http.HandlerFunc(h.handleListHistory)))
+	h.mux.Handle("GET /api/v1/vault", h.requireAuth(http.HandlerFunc(h.handleListVault)))
+	h.mux.Handle("GET /api/v1/media/{id}", h.requireAuth(http.HandlerFunc(h.handleGetMedia)))
+	
+	// API v1 (Public - ULID acts as capability token)
+	h.mux.HandleFunc("GET /api/v1/media/{id}/file", h.handleGetMediaFile)
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
@@ -105,6 +137,37 @@ func (h *Handler) cors(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (h *Handler) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.authToken == "" {
+			// No auth configured, allow all
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Missing Authorization header")
+			return
+		}
+
+		// Check "Bearer <token>"
+		const prefix = "Bearer "
+		if len(authHeader) <= len(prefix) || authHeader[:len(prefix)] != prefix {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid Authorization header format")
+			return
+		}
+
+		token := authHeader[len(prefix):]
+		if token != h.authToken {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid token")
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
