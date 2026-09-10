@@ -1,0 +1,38 @@
+# Retriva — Personal Media Downloader
+# https://github.com/A-007481D/retriva
+#
+# Quick start:
+#   cp .env.example .env
+#   docker compose up -d
+#   open http://localhost:8080
+
+services:
+  retriva:
+    image: ghcr.io/a-007481d/retriva:latest
+    ports:
+      - "${RETRIVA_PORT:-8080}:8080"
+    volumes:
+      - retriva-data:/data
+    environment:
+      RETRIVA_PORT: "8080"
+      RETRIVA_DATA_DIR: "/data"
+      RETRIVA_DATABASE: "/data/retriva.db"
+      RETRIVA_RETENTION_DAYS: "${RETRIVA_RETENTION_DAYS:-7}"
+      RETRIVA_MAX_FILE_SIZE_BYTES: "${RETRIVA_MAX_FILE_SIZE_BYTES:-2GB}"
+      RETRIVA_REQUEST_TIMEOUT: "${RETRIVA_REQUEST_TIMEOUT:-30s}"
+      RETRIVA_DOWNLOAD_TIMEOUT: "${RETRIVA_DOWNLOAD_TIMEOUT:-30m}"
+      RETRIVA_MAX_REDIRECTS: "${RETRIVA_MAX_REDIRECTS:-5}"
+      RETRIVA_WORKERS: "${RETRIVA_WORKERS:-2}"
+      RETRIVA_AUTH_TOKEN: "${RETRIVA_AUTH_TOKEN:-}"
+      RETRIVA_LOG_LEVEL: "${RETRIVA_LOG_LEVEL:-info}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  retriva-data:
+    driver: local
