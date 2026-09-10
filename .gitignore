@@ -1,5 +1,5 @@
 # Go
-server/bin/
+bin/
 server/retriva
 server/retriva.exe
 *.exe
@@ -11,9 +11,9 @@ server/retriva.exe
 vendor/
 
 # Node
-web/node_modules/
-web/dist/
-web/.vite/
+client/node_modules/
+client/dist/
+client/.vite/
 
 # Data (bind-mounted at runtime)
 data/

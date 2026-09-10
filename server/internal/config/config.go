@@ -36,6 +36,10 @@ type Config struct {
 
 	// Logging
 	LogLevel string
+
+	// Extractors
+	YtDlpPath    string
+	YtDlpCookies string
 }
 
 // Load reads all configuration from environment variables, applies defaults,
@@ -84,6 +88,9 @@ func Load() (*Config, error) {
 	}
 
 	cfg.AuthToken = envStr("RETRIVA_AUTH_TOKEN", "")
+
+	cfg.YtDlpPath = envStr("RETRIVA_YTDLP_PATH", "yt-dlp")
+	cfg.YtDlpCookies = envStr("RETRIVA_YTDLP_COOKIES", "")
 
 	cfg.LogLevel = strings.ToLower(envStr("RETRIVA_LOG_LEVEL", "info"))
 	switch cfg.LogLevel {

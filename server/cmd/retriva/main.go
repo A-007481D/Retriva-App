@@ -21,6 +21,7 @@ import (
 	"github.com/A-007481D/retriva/server/internal/media"
 	"github.com/A-007481D/retriva/server/internal/resolver"
 	"github.com/A-007481D/retriva/server/internal/resolver/direct"
+	"github.com/A-007481D/retriva/server/internal/resolver/ytdlp"
 	"github.com/A-007481D/retriva/server/internal/storage/filesystem"
 	"github.com/A-007481D/retriva/server/internal/vault"
 )
@@ -62,7 +63,11 @@ func run() error {
 	historyRepo := history.NewSQLiteRepository(db.DB)
 
 	// Initialize resolver and downloader
-	resRegistry := resolver.NewRegistry(direct.New())
+	// Priority: 1. Direct, 2. YtDlp
+	resRegistry := resolver.NewRegistry(
+		direct.New(),
+		ytdlp.New(cfg.YtDlpPath, cfg.YtDlpCookies),
+	)
 	dl := downloader.NewHTTPDownloader(store, 30*time.Second, 1024*1024*1024, 5) // 1GB max
 
 	// Initialize executor and worker pool
