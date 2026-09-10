@@ -49,9 +49,16 @@ var blockedHostnames = []string{
 	"instance-data",
 }
 
+// DisableSSRFCheck is used only in unit tests to allow testing against localhost.
+var DisableSSRFCheck = false
+
 // CheckSSRF verifies that the hostname resolves to a public IP address
 // and is not in the blocked hostnames list.
 func CheckSSRF(ctx context.Context, rawURL string) error {
+	if DisableSSRFCheck {
+		return nil
+	}
+
 	u, err := url.ParseRequestURI(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid url: %w", err)
