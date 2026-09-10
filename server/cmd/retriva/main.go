@@ -22,6 +22,7 @@ import (
 	"github.com/A-007481D/retriva/server/internal/resolver"
 	"github.com/A-007481D/retriva/server/internal/resolver/direct"
 	"github.com/A-007481D/retriva/server/internal/storage/filesystem"
+	"github.com/A-007481D/retriva/server/internal/vault"
 )
 
 // version is injected at build time via:
@@ -68,6 +69,9 @@ func run() error {
 	exec := jobs.NewExecutor(resRegistry, dl, jobsRepo, mediaRepo, historyRepo, logger)
 	pool := jobs.NewWorkerPool(cfg.Workers, 1000, exec, logger)
 
+	// Initialize vault service
+	vaultService := vault.NewService(mediaRepo, store, logger)
+
 	// Propagate version to API handler.
 	api.Version = version
 
@@ -91,6 +95,9 @@ func run() error {
 
 	pool.Start()
 	logger.Info("worker pool started", slog.Int("workers", cfg.Workers))
+
+	vaultService.Start(1 * time.Hour)
+	logger.Info("vault service started")
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -117,6 +124,9 @@ func run() error {
 		
 		pool.Stop()
 		logger.Info("worker pool stopped")
+
+		vaultService.Stop()
+		logger.Info("vault service stopped")
 
 		logger.Info("shutdown complete")
 		return nil
