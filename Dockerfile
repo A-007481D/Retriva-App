@@ -12,7 +12,7 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Build Go server (embeds the frontend)
 # =============================================================================
-FROM golang:1.23-alpine AS server-builder
+FROM golang:alpine AS server-builder
 RUN apk add --no-cache git
 WORKDIR /app/server
 COPY server/go.* ./
