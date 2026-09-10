@@ -1,0 +1,25 @@
+# Production override for compose.yaml
+#
+# Usage:
+#   docker compose -f compose.yaml -f compose.production.yaml up -d
+#
+# This file layers production-specific settings on top of the base compose.yaml.
+# Suitable for a single-host VPS deployment.
+
+services:
+  retriva:
+    # Pin to a specific release version in production (don't use 'latest' in prod)
+    # image: ghcr.io/a-007481d/retriva:v0.1.0
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Uncomment to bind only on localhost behind a reverse proxy (Nginx/Caddy)
+    # ports:
+    #   - "127.0.0.1:8080:8080"

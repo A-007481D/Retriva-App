@@ -1,0 +1,42 @@
+# Go
+server/bin/
+server/retriva
+server/retriva.exe
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Node
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Data (bind-mounted at runtime)
+data/
+!data/.gitkeep
+
+# Environment
+.env
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swa
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.tar
+
+# Test coverage
+coverage.out
+coverage.html
