@@ -14,6 +14,8 @@ import (
 
 	"github.com/A-007481D/retriva/server/internal/api"
 	"github.com/A-007481D/retriva/server/internal/config"
+	"github.com/A-007481D/retriva/server/internal/database"
+	"github.com/A-007481D/retriva/server/internal/storage/filesystem"
 )
 
 // version is injected at build time via:
@@ -36,10 +38,21 @@ func run() error {
 
 	logger := newLogger(cfg.LogLevel)
 
+	db, err := database.Open(cfg.Database, logger)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+
+	store, err := filesystem.New(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("init storage: %w", err)
+	}
+
 	// Propagate version to API handler.
 	api.Version = version
 
-	handler := api.New(logger)
+	handler := api.New(logger, db, store)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
