@@ -9,6 +9,8 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/A-007481D/retriva/server/internal/database"
+	"github.com/A-007481D/retriva/server/internal/storage"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -21,15 +23,19 @@ const requestIDKey contextKey = "requestID"
 
 // Handler is the root HTTP handler. It owns the ServeMux and middleware chain.
 type Handler struct {
-	mux    *http.ServeMux
-	logger *slog.Logger
+	mux     *http.ServeMux
+	logger  *slog.Logger
+	db      *database.DB
+	storage storage.Storage
 }
 
 // New creates a fully configured Handler with all routes registered.
-func New(logger *slog.Logger) *Handler {
+func New(logger *slog.Logger, db *database.DB, store storage.Storage) *Handler {
 	h := &Handler{
-		mux:    http.NewServeMux(),
-		logger: logger,
+		mux:     http.NewServeMux(),
+		logger:  logger,
+		db:      db,
+		storage: store,
 	}
 	h.registerRoutes()
 	return h
