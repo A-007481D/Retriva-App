@@ -3,10 +3,10 @@
 # Stage 1: Build web frontend
 # =============================================================================
 FROM node:22-alpine AS web-builder
-WORKDIR /app/web
-COPY web/package*.json ./
+WORKDIR /app/client
+COPY client/package*.json ./
 RUN npm ci --silent
-COPY web/ ./
+COPY client/ ./
 RUN npm run build
 
 # =============================================================================
@@ -19,7 +19,7 @@ COPY server/go.* ./
 RUN go mod download
 COPY server/ ./
 # Embed the built frontend into the binary via go:embed
-COPY --from=web-builder /app/web/dist ./static
+COPY --from=web-builder /app/client/dist ./static
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
@@ -30,7 +30,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Stage 3: Minimal runtime image
 # =============================================================================
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata && \
+RUN apk add --no-cache ca-certificates tzdata python3 ffmpeg curl && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+    chmod a+rx /usr/local/bin/yt-dlp && \
     addgroup -g 1001 -S retriva && \
     adduser -u 1001 -S -G retriva retriva
 

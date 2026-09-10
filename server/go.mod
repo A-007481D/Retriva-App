@@ -1,6 +1,6 @@
 module github.com/A-007481D/retriva/server
 
-go 1.26.6
+go 1.23.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
