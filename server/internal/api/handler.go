@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"time"
 
@@ -83,6 +84,26 @@ func (h *Handler) registerRoutes() {
 	
 	// API v1 (Public - ULID acts as capability token)
 	h.mux.HandleFunc("GET /api/v1/media/{id}/file", h.handleGetMediaFile)
+
+	// Serve static frontend files (SPA fallback to index.html)
+	fs := http.FileServer(http.Dir("../../client/dist"))
+	h.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// If it's an API route that somehow fell through, just 404
+		if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
+			http.NotFound(w, r)
+			return
+		}
+		
+		// Try to serve the requested file
+		path := "../../client/dist" + r.URL.Path
+		if _, err := os.Stat(path); err == nil {
+			fs.ServeHTTP(w, r)
+			return
+		}
+		
+		// Otherwise, fall back to index.html
+		http.ServeFile(w, r, "../../client/dist/index.html")
+	}))
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
