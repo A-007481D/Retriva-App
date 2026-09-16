@@ -18,6 +18,8 @@ client/.vite/
 # Data (bind-mounted at runtime)
 data/
 !data/.gitkeep
+cookies.txt
+highlight.json
 
 # Environment
 .env
