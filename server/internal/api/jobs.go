@@ -41,7 +41,7 @@ func (h *Handler) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		MIMEType:   "application/octet-stream",
 		Status:     media.StatusPending,
 		CreatedAt:  now,
-		ExpiresAt:  now.Add(24 * time.Hour),
+		ExpiresAt:  now.Add(30 * 24 * time.Hour), // Set to 30 days retention
 	}
 
 	if err := h.mediaRepo.Create(ctx, m); err != nil {

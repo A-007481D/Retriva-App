@@ -56,7 +56,7 @@ func Load() (*Config, error) {
 	cfg.DataDir = envStr("RETRIVA_DATA_DIR", "/data")
 	cfg.Database = envStr("RETRIVA_DATABASE", "/data/retriva.db")
 
-	cfg.RetentionDays = envInt("RETRIVA_RETENTION_DAYS", 7)
+	cfg.RetentionDays = envInt("RETRIVA_RETENTION_DAYS", 30)
 	if cfg.RetentionDays < 1 {
 		errs = append(errs, "RETRIVA_RETENTION_DAYS must be >= 1")
 	}
@@ -90,7 +90,12 @@ func Load() (*Config, error) {
 	cfg.AuthToken = envStr("RETRIVA_AUTH_TOKEN", "")
 
 	cfg.YtDlpPath = envStr("RETRIVA_YTDLP_PATH", "yt-dlp")
-	cfg.YtDlpCookies = envStr("RETRIVA_YTDLP_COOKIES", "")
+	
+	defaultCookies := ""
+	if _, err := os.Stat("cookies.txt"); err == nil {
+		defaultCookies = "cookies.txt"
+	}
+	cfg.YtDlpCookies = envStr("RETRIVA_YTDLP_COOKIES", defaultCookies)
 
 	cfg.LogLevel = strings.ToLower(envStr("RETRIVA_LOG_LEVEL", "info"))
 	switch cfg.LogLevel {

@@ -11,7 +11,7 @@ dev-client:
 	cd client && npm run dev
 
 dev-server:
-	cd server && go run cmd/retriva/main.go
+	cd server && RETRIVA_DATA_DIR=../data RETRIVA_DATABASE=../data/retriva.db go run cmd/retriva/main.go
 
 # Build the application for production
 build: build-client build-server
