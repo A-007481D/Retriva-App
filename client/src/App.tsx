@@ -1,46 +1,29 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import DotField from "./components/ui/DotField";
+import { Navbar } from "./components/ui/Navbar";
 import { BottomTabs } from "./components/ui/BottomTabs";
-
 import { Home } from "./pages/Home";
-
-// Placeholders for views
-const Library = () => <div className="p-6 pt-16 h-full text-center text-white">Library View</div>;
-const Settings = () => <div className="p-6 pt-16 h-full text-center text-white">Settings View</div>;
+import { Vault } from "./pages/Vault";
 
 function App() {
   return (
-    <div className="relative min-h-screen w-full font-sans selection:bg-mesh-2/30">
-      {/* Glowing aurora background */}
-      <div className="fixed inset-0 z-0 overflow-hidden">
-        <div className="glow-orb-1 top-[-10%] left-[-10%]" />
-        <div className="glow-orb-2 bottom-[-5%] right-[-10%]" />
-        <div className="glow-orb-3 top-[30%] left-[40%]" />
-      </div>
+    <div className="relative min-h-screen w-full bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
+      {/* Subtle tech grid background */}
+      <div className="fixed inset-0 z-0 bg-grid-subtle opacity-70 pointer-events-none" />
 
-      {/* Dot field on top of glow */}
-      <div className="fixed inset-0 z-[1]">
-        <DotField
-          dotRadius={1.5}
-          dotSpacing={14}
-          bulgeStrength={67}
-          glowRadius={160}
-          sparkle={false}
-          waveAmplitude={0}
-        />
-      </div>
+      {/* Top Navbar */}
+      <Navbar />
 
       {/* Main Content Area */}
-      <main className="pb-24 min-h-screen relative z-10">
+      <main className="relative z-10 min-h-screen">
         <Routes>
           <Route path="/home" element={<Home />} />
-          <Route path="/library" element={<Library />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/library" element={<Vault />} />
+          <Route path="/vault" element={<Navigate to="/library" replace />} />
           <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </main>
 
-      {/* Floating Navigation */}
+      {/* Mobile Floating Tab Navigation */}
       <BottomTabs />
     </div>
   );

@@ -14,11 +14,19 @@ export interface Job {
 
 export interface Media {
   id: string
-  title: string
-  source: string
+  ownerId?: string
+  sourceUrl?: string
+  sourceType?: string
+  filename: string
+  mimeType: string
+  sizeBytes: number
   status: 'pending' | 'active' | 'expired'
-  size_bytes: number
-  storage_key: string
+  createdAt: string
+  expiresAt: string
+}
+
+export function getMediaFileUrl(id: string): string {
+  return `${API_BASE}/media/${id}/file`
 }
 
 export interface InspectItem {

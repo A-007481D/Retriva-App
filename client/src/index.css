@@ -1,103 +1,69 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  
-  --color-glass-light: rgba(255, 255, 255, 0.1);
-  --color-glass-border: rgba(255, 255, 255, 0.2);
-  --color-glass-heavy: rgba(255, 255, 255, 0.05);
-  
-  /* Mesh Gradient Base Colors */
-  --color-mesh-bg: #09090b; /* Zinc 950 */
-  --color-mesh-1: #c026d3; /* Fuchsia 600 */
-  --color-mesh-2: #3b82f6; /* Blue 500 */
-  --color-mesh-3: #8b5cf6; /* Violet 500 */
-}
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-@utility glass {
-  background: var(--color-glass-light);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--color-glass-border);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-}
+  --color-brand-emerald: #10b981;
+  --color-brand-emerald-dark: #059669;
+  --color-brand-emerald-light: #34d399;
 
-@utility glass-panel {
-  background: var(--color-glass-heavy);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid var(--color-glass-border);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  border-radius: 1.5rem;
+  --color-pro-bg: #09090b;
+  --color-pro-surface: #111216;
+  --color-pro-surface-hover: #16171d;
+  --color-pro-border: rgba(255, 255, 255, 0.08);
+  --color-pro-border-hover: rgba(255, 255, 255, 0.16);
 }
 
 @layer base {
   body {
-    @apply antialiased min-h-screen text-white bg-mesh-bg;
+    @apply antialiased min-h-screen text-zinc-100 bg-[#09090b];
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
-  
+
   ::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
   }
 }
 
-/* Aurora glow orbs */
-@keyframes drift-1 {
-  0%, 100% { transform: translate(0%, 0%) scale(1); }
-  25% { transform: translate(10%, -15%) scale(1.1); }
-  50% { transform: translate(-5%, 10%) scale(0.95); }
-  75% { transform: translate(-10%, -5%) scale(1.05); }
+/* Subtle tech grid background */
+.bg-grid-subtle {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 
-@keyframes drift-2 {
-  0%, 100% { transform: translate(0%, 0%) scale(1); }
-  25% { transform: translate(-15%, 10%) scale(1.05); }
-  50% { transform: translate(10%, -10%) scale(1.1); }
-  75% { transform: translate(5%, 15%) scale(0.9); }
+@utility pro-glass {
+  background: rgba(17, 18, 22, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-@keyframes drift-3 {
-  0%, 100% { transform: translate(0%, 0%) scale(1.05); }
-  33% { transform: translate(12%, 8%) scale(0.95); }
-  66% { transform: translate(-8%, -12%) scale(1.1); }
+@utility pro-card {
+  background: #111216;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
 }
 
-@utility glow-orb-1 {
-  position: absolute;
-  width: 60vw;
-  height: 60vh;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, transparent 70%);
-  filter: blur(80px);
-  animation: drift-1 20s ease-in-out infinite;
-  pointer-events: none;
-}
+@utility pro-input {
+  background: #14151a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.875rem;
+  transition: all 0.2s ease;
 
-@utility glow-orb-2 {
-  position: absolute;
-  width: 50vw;
-  height: 50vh;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(6, 182, 212, 0.12) 0%, transparent 70%);
-  filter: blur(80px);
-  animation: drift-2 25s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@utility glow-orb-3 {
-  position: absolute;
-  width: 45vw;
-  height: 45vh;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(192, 38, 211, 0.1) 0%, transparent 70%);
-  filter: blur(90px);
-  animation: drift-3 30s ease-in-out infinite;
-  pointer-events: none;
+  &:focus-within {
+    border-color: rgba(16, 185, 129, 0.5);
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3), 0 0 20px rgba(16, 185, 129, 0.1);
+  }
 }

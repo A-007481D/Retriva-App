@@ -1,20 +1,20 @@
 import React, { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, Download, ClipboardPaste } from "lucide-react";
+import { X, ArrowRight, ClipboardPaste, Link2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 interface LiquidInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   onSubmitUrl?: (url: string) => void;
+  isLoading?: boolean;
 }
 
 export const LiquidInput = React.forwardRef<HTMLInputElement, LiquidInputProps>(
-  ({ className, onSubmitUrl, ...props }, ref) => {
+  ({ className, onSubmitUrl, isLoading, ...props }, ref) => {
     const [isFocused, setIsFocused] = useState(false);
     const [value, setValue] = useState("");
 
     const handleSubmit = (e: React.FormEvent) => {
       e.preventDefault();
-      if (value.trim() && onSubmitUrl) {
+      if (value.trim() && onSubmitUrl && !isLoading) {
         onSubmitUrl(value.trim());
       }
     };
@@ -22,8 +22,10 @@ export const LiquidInput = React.forwardRef<HTMLInputElement, LiquidInputProps>(
     const handlePaste = async () => {
       try {
         const text = await navigator.clipboard.readText();
-        setValue(text);
-        setIsFocused(true);
+        if (text) {
+          setValue(text);
+          setIsFocused(true);
+        }
       } catch (err) {
         console.error("Failed to read clipboard contents: ", err);
       }
@@ -31,20 +33,21 @@ export const LiquidInput = React.forwardRef<HTMLInputElement, LiquidInputProps>(
 
     return (
       <div className={cn("relative w-full max-w-3xl mx-auto", className)}>
-        {/* Glow / Liquid backplate */}
-        <motion.div
-          className="absolute -inset-1 rounded-[1.5rem] bg-gradient-to-r from-mesh-1 via-mesh-2 to-mesh-3 blur-md opacity-20 pointer-events-none"
-          animate={{
-            opacity: isFocused ? 0.6 : 0.2,
-            scale: isFocused ? 1.01 : 1,
-          }}
-          transition={{ duration: 0.4, ease: "easeOut" }}
-        />
-
         <form
           onSubmit={handleSubmit}
-          className="relative flex items-center w-full h-[64px] glass-panel !rounded-[1.5rem] px-2 overflow-hidden bg-[#18181b]/60 border-white/10"
+          className={cn(
+            "relative flex items-center w-full h-[62px] rounded-2xl px-2.5 bg-[#121318] border transition-all duration-200 shadow-xl shadow-black/40",
+            isFocused
+              ? "border-emerald-500/60 ring-1 ring-emerald-500/30 shadow-[0_0_25px_rgba(16,185,129,0.12)]"
+              : "border-white/[0.1] hover:border-white/[0.18]"
+          )}
         >
+          {/* Leading Icon */}
+          <div className="pl-2 pr-1 text-zinc-500 flex items-center justify-center">
+            <Link2 className="w-5 h-5 text-zinc-400" />
+          </div>
+
+          {/* Text Input */}
           <input
             ref={ref}
             type="url"
@@ -52,48 +55,49 @@ export const LiquidInput = React.forwardRef<HTMLInputElement, LiquidInputProps>(
             onChange={(e) => setValue(e.target.value)}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            placeholder="Paste the story or profile link here..."
-            className="w-full h-full bg-transparent border-none outline-none text-white px-4 text-[16px] placeholder-white/40 font-medium"
+            placeholder="Paste Instagram story, highlight, post, or video URL..."
+            disabled={isLoading}
+            className="w-full h-full bg-transparent border-none outline-none text-white px-3 text-[15px] placeholder-zinc-500 font-medium"
             {...props}
           />
 
-          <AnimatePresence>
-            {value.length > 0 && (
-              <motion.button
-                type="button"
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.5 }}
-                onClick={() => setValue("")}
-                className="w-6 h-6 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white mr-2 flex-shrink-0 transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-              </motion.button>
-            )}
-          </AnimatePresence>
+          {/* Clear button */}
+          {value.length > 0 && !isLoading && (
+            <button
+              type="button"
+              onClick={() => setValue("")}
+              className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-zinc-400 hover:text-white mr-2 flex-shrink-0 transition-colors"
+              title="Clear input"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
 
-          <div className="flex items-center gap-2 flex-shrink-0 ml-1">
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Quick Paste Button */}
             <button
               type="button"
               onClick={handlePaste}
-              className="h-[44px] px-4 rounded-xl bg-white/5 hover:bg-white/10 text-white text-sm font-medium flex items-center gap-2 transition-colors border border-white/5 hidden sm:flex"
+              className="h-10 px-3.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all border border-white/[0.06] hidden sm:flex"
             >
-              <ClipboardPaste className="w-4 h-4 text-white/70" />
-              Paste
+              <ClipboardPaste className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Paste</span>
             </button>
-            
+
+            {/* Submit / Extract Button */}
             <button
               type="submit"
-              disabled={!value.trim()}
+              disabled={!value.trim() || isLoading}
               className={cn(
-                "h-[44px] px-6 rounded-xl text-black text-sm font-bold flex items-center gap-2 transition-all",
-                value.trim() 
-                  ? "bg-gradient-to-r from-teal-400 to-emerald-400 hover:opacity-90 active:scale-95 cursor-pointer shadow-[0_0_15px_rgba(45,212,191,0.4)]" 
-                  : "bg-white/10 text-white/40 cursor-not-allowed"
+                "h-10 px-5 rounded-xl text-black text-xs font-bold flex items-center gap-2 transition-all",
+                value.trim() && !isLoading
+                  ? "bg-emerald-400 hover:bg-emerald-300 active:scale-95 cursor-pointer shadow-md shadow-emerald-500/25"
+                  : "bg-white/[0.08] text-zinc-500 cursor-not-allowed"
               )}
             >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Download</span>
+              <span>{isLoading ? "Inspecting..." : "Extract"}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </form>
