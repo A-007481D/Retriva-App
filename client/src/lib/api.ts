@@ -24,6 +24,7 @@ export interface Media {
 export interface InspectItem {
   index: number
   id: string
+  type?: 'video' | 'photo'
   title: string
   duration: number
   timestamp: number

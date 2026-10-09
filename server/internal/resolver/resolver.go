@@ -29,6 +29,7 @@ type Resolver interface {
 type PlaylistItem struct {
 	Index     int     `json:"index"`
 	ID        string  `json:"id"`
+	Type      string  `json:"type,omitempty"` // "video" or "photo"
 	Title     string  `json:"title"`
 	Duration  float64 `json:"duration"`
 	Timestamp int64   `json:"timestamp"`

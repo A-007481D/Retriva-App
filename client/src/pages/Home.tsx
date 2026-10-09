@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { LiquidInput } from "../components/ui/LiquidInput";
-import { MediaPreviewSheet } from "../components/ui/MediaPreviewSheet";
+import { MediaPreviewSheet, type MediaItem } from "../components/ui/MediaPreviewSheet";
 import { createJob, inspectUrl } from "../lib/api";
 import { Check, MonitorPlay, Camera, Hash, Music, PlaySquare, Image as ImageIcon, Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -24,7 +24,7 @@ const PLATFORMS = [
 export const Home = () => {
   const [activePlatform, setActivePlatform] = useState("youtube");
   const [isSheetOpen, setIsSheetOpen] = useState(false);
-  const [previewItems, setPreviewItems] = useState<{ id: string; title: string; thumbnail?: string; duration?: string }[]>([]);
+  const [previewItems, setPreviewItems] = useState<MediaItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentUrl, setCurrentUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -42,8 +42,9 @@ export const Home = () => {
         setStatusMessage("Inspecting highlight stories...");
         const res = await inspectUrl(url);
         if (res.items && res.items.length > 1) {
-          const items = res.items.map((it) => ({
+          const items: MediaItem[] = res.items.map((it) => ({
             id: String(it.index),
+            type: it.type || (it.duration ? "video" : "photo"),
             title: it.title || `Story #${it.index}`,
             thumbnail: it.thumbnail,
             duration: it.duration ? `${Math.round(it.duration)}s` : undefined,
@@ -80,11 +81,19 @@ export const Home = () => {
     setSelectedIds(next);
   };
 
-  const handleSelectAll = () => {
-    setSelectedIds(new Set(previewItems.map((i) => i.id)));
+  const handleSelectMultiple = (ids: string[]) => {
+    const next = new Set(selectedIds);
+    ids.forEach((id) => next.add(id));
+    setSelectedIds(next);
   };
 
-  const handleDeselectAll = () => {
+  const handleDeselectMultiple = (ids: string[]) => {
+    const next = new Set(selectedIds);
+    ids.forEach((id) => next.delete(id));
+    setSelectedIds(next);
+  };
+
+  const handleClearAll = () => {
     setSelectedIds(new Set());
   };
 
@@ -221,8 +230,9 @@ export const Home = () => {
           items={previewItems}
           selectedIds={selectedIds}
           onToggleSelect={handleToggleSelect}
-          onSelectAll={handleSelectAll}
-          onDeselectAll={handleDeselectAll}
+          onSelectMultiple={handleSelectMultiple}
+          onDeselectMultiple={handleDeselectMultiple}
+          onClearAll={handleClearAll}
           onDownload={handleDownloadSelected}
         />
 
