@@ -47,6 +47,9 @@ type Item struct {
 
 // IsExpired reports whether the server-side copy has passed its expiry time.
 func (i *Item) IsExpired() bool {
+	if i.ExpiresAt.IsZero() || i.ExpiresAt.Year() >= 9999 {
+		return false
+	}
 	return time.Now().UTC().After(i.ExpiresAt)
 }
 

@@ -11,10 +11,12 @@ import (
 
 // Service manages the lifecycle of media files, such as expiration and deletion.
 type Service struct {
-	repo    media.Repository
-	storage storage.Storage
-	logger  *slog.Logger
-	stop    chan struct{}
+	repo             media.Repository
+	storage          storage.Storage
+	logger           *slog.Logger
+	retentionDays    int
+	retentionDaysSet bool
+	stop             chan struct{}
 }
 
 // NewService creates a new vault service.
@@ -25,6 +27,12 @@ func NewService(repo media.Repository, st storage.Storage, logger *slog.Logger) 
 		logger:  logger,
 		stop:    make(chan struct{}),
 	}
+}
+
+// SetRetentionDays sets the retention policy in days. 0 or negative means never expire.
+func (s *Service) SetRetentionDays(days int) {
+	s.retentionDays = days
+	s.retentionDaysSet = true
 }
 
 // Start begins a background goroutine to periodically clean up expired media.
@@ -55,6 +63,10 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) cleanup(ctx context.Context) {
+	if s.retentionDaysSet && s.retentionDays <= 0 {
+		// Retention is set to never expire; skip cleanup
+		return
+	}
 	expired, err := s.repo.ListExpired(ctx)
 	if err != nil {
 		s.logger.Error("failed to list expired media", slog.Any("error", err))

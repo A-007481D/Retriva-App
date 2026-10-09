@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ type Config struct {
 	DataDir  string
 	Database string
 
-	// Retention
+	// Retention (0 = never expire)
 	RetentionDays int
 
 	// Limits
@@ -42,9 +43,40 @@ type Config struct {
 	YtDlpCookies string
 }
 
+// loadDotEnv attempts to read key-values from .env or ../.env if not already set.
+func loadDotEnv() {
+	for _, envFile := range []string{".env", "../.env"} {
+		data, err := os.ReadFile(envFile)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.TrimSpace(parts[1])
+				if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+					val = val[1 : len(val)-1]
+				}
+				if os.Getenv(key) == "" {
+					os.Setenv(key, val)
+				}
+			}
+		}
+		break
+	}
+}
+
 // Load reads all configuration from environment variables, applies defaults,
 // and validates the result. Returns an error listing all problems found.
 func Load() (*Config, error) {
+	loadDotEnv()
+
 	cfg := &Config{}
 	var errs []string
 
@@ -56,9 +88,10 @@ func Load() (*Config, error) {
 	cfg.DataDir = envStr("RETRIVA_DATA_DIR", "/data")
 	cfg.Database = envStr("RETRIVA_DATABASE", "/data/retriva.db")
 
-	cfg.RetentionDays = envInt("RETRIVA_RETENTION_DAYS", 30)
-	if cfg.RetentionDays < 1 {
-		errs = append(errs, "RETRIVA_RETENTION_DAYS must be >= 1")
+	// RetentionDays = 0 means media will never expire.
+	cfg.RetentionDays = envInt("RETRIVA_RETENTION_DAYS", 0)
+	if cfg.RetentionDays < 0 {
+		errs = append(errs, "RETRIVA_RETENTION_DAYS must be >= 0 (0 = never expire)")
 	}
 
 	var err error
@@ -90,10 +123,17 @@ func Load() (*Config, error) {
 	cfg.AuthToken = envStr("RETRIVA_AUTH_TOKEN", "")
 
 	cfg.YtDlpPath = envStr("RETRIVA_YTDLP_PATH", "yt-dlp")
-	
+
 	defaultCookies := ""
-	if _, err := os.Stat("cookies.txt"); err == nil {
-		defaultCookies = "cookies.txt"
+	for _, candidate := range []string{"data/cookies.txt", "../data/cookies.txt", "cookies.txt", "/data/cookies.txt"} {
+		if _, err := os.Stat(candidate); err == nil {
+			if abs, err := filepath.Abs(candidate); err == nil {
+				defaultCookies = abs
+			} else {
+				defaultCookies = candidate
+			}
+			break
+		}
 	}
 	cfg.YtDlpCookies = envStr("RETRIVA_YTDLP_COOKIES", defaultCookies)
 

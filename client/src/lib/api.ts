@@ -21,11 +21,45 @@ export interface Media {
   storage_key: string
 }
 
-export async function createJob(url: string): Promise<Job> {
-  const res = await fetch(`${API_BASE}/jobs`, {
+export interface InspectItem {
+  index: number
+  id: string
+  title: string
+  duration: number
+  timestamp: number
+  thumbnail: string
+}
+
+export interface InspectResult {
+  title: string
+  count: number
+  items: InspectItem[]
+}
+
+export async function inspectUrl(url: string): Promise<InspectResult> {
+  const res = await fetch(`${API_BASE}/inspect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url })
+  })
+  
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }))
+    throw new Error(err.error || 'Failed to inspect URL')
+  }
+  
+  return res.json()
+}
+
+export async function createJob(url: string, items?: string[]): Promise<any> {
+  const payload: any = { url }
+  if (items && items.length > 0) {
+    payload.items = items
+  }
+  const res = await fetch(`${API_BASE}/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
   })
   
   if (!res.ok) {

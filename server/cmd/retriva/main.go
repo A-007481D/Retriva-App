@@ -76,11 +76,12 @@ func run() error {
 
 	// Initialize vault service
 	vaultService := vault.NewService(mediaRepo, store, logger)
+	vaultService.SetRetentionDays(cfg.RetentionDays)
 
 	// Propagate version to API handler.
 	api.Version = version
 
-	handler := api.New(logger, db, store, jobsRepo, mediaRepo, historyRepo, pool, cfg.AuthToken)
+	handler := api.New(logger, db, store, jobsRepo, mediaRepo, historyRepo, resRegistry, pool, cfg.AuthToken, cfg.RetentionDays)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -95,14 +96,19 @@ func run() error {
 		slog.String("addr", srv.Addr),
 		slog.String("data_dir", cfg.DataDir),
 		slog.Int("workers", cfg.Workers),
+		slog.Int("retention_days", cfg.RetentionDays),
 		slog.Bool("auth_enabled", cfg.AuthToken != ""),
 	)
 
 	pool.Start()
 	logger.Info("worker pool started", slog.Int("workers", cfg.Workers))
 
-	vaultService.Start(1 * time.Hour)
-	logger.Info("vault service started")
+	if cfg.RetentionDays > 0 {
+		vaultService.Start(1 * time.Hour)
+		logger.Info("vault service started", slog.Int("retention_days", cfg.RetentionDays))
+	} else {
+		logger.Info("media retention is disabled (never expire); vault auto-cleanup disabled")
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -130,8 +136,10 @@ func run() error {
 		pool.Stop()
 		logger.Info("worker pool stopped")
 
-		vaultService.Stop()
-		logger.Info("vault service stopped")
+		if cfg.RetentionDays > 0 {
+			vaultService.Stop()
+			logger.Info("vault service stopped")
+		}
 
 		logger.Info("shutdown complete")
 		return nil

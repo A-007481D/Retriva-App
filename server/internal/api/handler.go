@@ -4,9 +4,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/A-007481D/retriva/server/internal/history"
 	"github.com/A-007481D/retriva/server/internal/jobs"
 	"github.com/A-007481D/retriva/server/internal/media"
+	"github.com/A-007481D/retriva/server/internal/resolver"
 	"github.com/A-007481D/retriva/server/internal/storage"
 	"github.com/oklog/ulid/v2"
 )
@@ -27,15 +30,17 @@ const requestIDKey contextKey = "requestID"
 
 // Handler is the root HTTP handler. It owns the ServeMux and middleware chain.
 type Handler struct {
-	mux         *http.ServeMux
-	logger      *slog.Logger
-	db          *database.DB
-	storage     storage.Storage
-	jobsRepo    jobs.Repository
-	mediaRepo   media.Repository
-	historyRepo history.Repository
-	pool        *jobs.WorkerPool
-	authToken   string
+	mux           *http.ServeMux
+	logger        *slog.Logger
+	db            *database.DB
+	storage       storage.Storage
+	jobsRepo      jobs.Repository
+	mediaRepo     media.Repository
+	historyRepo   history.Repository
+	resolver      *resolver.Registry
+	pool          *jobs.WorkerPool
+	authToken     string
+	retentionDays int
 }
 
 // New creates a fully configured Handler with all routes registered.
@@ -46,19 +51,23 @@ func New(
 	jobsRepo jobs.Repository,
 	mediaRepo media.Repository,
 	historyRepo history.Repository,
+	resRegistry *resolver.Registry,
 	pool *jobs.WorkerPool,
 	authToken string,
+	retentionDays int,
 ) *Handler {
 	h := &Handler{
-		mux:         http.NewServeMux(),
-		logger:      logger,
-		db:          db,
-		storage:     store,
-		jobsRepo:    jobsRepo,
-		mediaRepo:   mediaRepo,
-		historyRepo: historyRepo,
-		pool:        pool,
-		authToken:   authToken,
+		mux:           http.NewServeMux(),
+		logger:        logger,
+		db:            db,
+		storage:       store,
+		jobsRepo:      jobsRepo,
+		mediaRepo:     mediaRepo,
+		historyRepo:   historyRepo,
+		resolver:      resRegistry,
+		pool:          pool,
+		authToken:     authToken,
+		retentionDays: retentionDays,
 	}
 	h.registerRoutes()
 	return h
@@ -77,6 +86,8 @@ func (h *Handler) registerRoutes() {
 	// API v1 (Auth Protected)
 	h.mux.Handle("POST /api/v1/jobs", h.requireAuth(http.HandlerFunc(h.handleCreateJob)))
 	h.mux.Handle("GET /api/v1/jobs", h.requireAuth(http.HandlerFunc(h.handleListJobs)))
+	h.mux.Handle("POST /api/v1/inspect", h.requireAuth(http.HandlerFunc(h.handleInspect)))
+	h.mux.Handle("GET /api/v1/inspect", h.requireAuth(http.HandlerFunc(h.handleInspect)))
 	h.mux.Handle("GET /api/v1/history", h.requireAuth(http.HandlerFunc(h.handleListHistory)))
 	h.mux.Handle("GET /api/v1/vault", h.requireAuth(http.HandlerFunc(h.handleListVault)))
 	h.mux.Handle("POST /api/v1/vault/{id}/recover", h.requireAuth(http.HandlerFunc(h.handleRecoverMedia)))
@@ -86,24 +97,39 @@ func (h *Handler) registerRoutes() {
 	h.mux.HandleFunc("GET /api/v1/media/{id}/file", h.handleGetMediaFile)
 
 	// Serve static frontend files (SPA fallback to index.html)
-	fs := http.FileServer(http.Dir("../../client/dist"))
-	h.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// If it's an API route that somehow fell through, just 404
-		if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
-			http.NotFound(w, r)
-			return
+	candidates := []string{
+		"client/dist",
+		"../client/dist",
+		"../../client/dist",
+	}
+	distDir := ""
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+			distDir = c
+			break
 		}
-		
-		// Try to serve the requested file
-		path := "../../client/dist" + r.URL.Path
-		if _, err := os.Stat(path); err == nil {
-			fs.ServeHTTP(w, r)
-			return
-		}
-		
-		// Otherwise, fall back to index.html
-		http.ServeFile(w, r, "../../client/dist/index.html")
-	}))
+	}
+
+	if distDir != "" {
+		fs := http.FileServer(http.Dir(distDir))
+		h.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// If it's an API route that fell through, 404
+			if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
+				http.NotFound(w, r)
+				return
+			}
+
+			// Try to serve the requested file if it exists
+			filePath := filepath.Join(distDir, filepath.Clean(r.URL.Path))
+			if fi, err := os.Stat(filePath); err == nil && !fi.IsDir() {
+				fs.ServeHTTP(w, r)
+				return
+			}
+
+			// Otherwise, fall back to index.html
+			http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
+		}))
+	}
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
@@ -192,6 +218,39 @@ func (h *Handler) requireAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (h *Handler) handleInspect(w http.ResponseWriter, r *http.Request) {
+	urlStr := ""
+	if r.Method == http.MethodGet {
+		urlStr = r.URL.Query().Get("url")
+	} else {
+		var req struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			urlStr = req.URL
+		}
+	}
+
+	if urlStr == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "URL is required")
+		return
+	}
+
+	if h.resolver == nil {
+		writeError(w, http.StatusInternalServerError, "not_available", "Resolver is not configured")
+		return
+	}
+
+	info, err := h.resolver.Inspect(r.Context(), urlStr)
+	if err != nil {
+		h.logger.Error("failed to inspect URL", "url", urlStr, "error", err)
+		writeError(w, http.StatusBadRequest, "inspect_failed", fmt.Sprintf("Failed to inspect URL: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, info)
 }
 
 // ─── Response helpers ────────────────────────────────────────────────────────

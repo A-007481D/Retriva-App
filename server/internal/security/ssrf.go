@@ -77,7 +77,7 @@ func CheckSSRF(ctx context.Context, rawURL string) error {
 	}
 
 	// Resolve the IPs. Use a timeout to prevent DNS tarpits.
-	resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	resolveCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	ips, err := net.DefaultResolver.LookupIP(resolveCtx, "ip", hostname)

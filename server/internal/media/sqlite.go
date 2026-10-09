@@ -116,7 +116,7 @@ func (r *SQLiteRepository) ListExpired(ctx context.Context) ([]*Item, error) {
 		       size_bytes, duration_s, width, height, storage_key, thumb_key,
 		       status, media_hash, created_at, expires_at
 		FROM media
-		WHERE expires_at < ? AND status = ?`, now, StatusActive)
+		WHERE expires_at < ? AND expires_at NOT LIKE '9999-%' AND status = ?`, now, StatusActive)
 	if err != nil {
 		return nil, fmt.Errorf("media.ListExpired: %w", err)
 	}

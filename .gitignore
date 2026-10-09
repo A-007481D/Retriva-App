@@ -19,6 +19,8 @@ client/.vite/
 data/
 !data/.gitkeep
 cookies.txt
+*cookies*.txt
+*.db
 highlight.json
 
 # Environment

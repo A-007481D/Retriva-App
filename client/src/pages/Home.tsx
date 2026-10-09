@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { LiquidInput } from "../components/ui/LiquidInput";
-import { Check, MonitorPlay, Camera, Hash, Music, PlaySquare, Image as ImageIcon } from "lucide-react";
+import { MediaPreviewSheet } from "../components/ui/MediaPreviewSheet";
+import { createJob, inspectUrl } from "../lib/api";
+import { Check, MonitorPlay, Camera, Hash, Music, PlaySquare, Image as ImageIcon, Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
 
 const FEATURES = [
@@ -21,10 +23,86 @@ const PLATFORMS = [
 
 export const Home = () => {
   const [activePlatform, setActivePlatform] = useState("youtube");
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [previewItems, setPreviewItems] = useState<{ id: string; title: string; thumbnail?: string; duration?: string }[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [currentUrl, setCurrentUrl] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const handleDownload = (url: string) => {
-    console.log("Downloading", url);
-    // TODO: Connect to backend API
+  const handleDownload = async (url: string) => {
+    if (!url.trim()) return;
+    setIsLoading(true);
+    setStatusMessage("Checking link...");
+    setCurrentUrl(url);
+
+    try {
+      // Check if it's a highlight or playlist
+      if (url.includes("/stories/highlights/") || url.includes("playlist")) {
+        setStatusMessage("Inspecting highlight stories...");
+        const res = await inspectUrl(url);
+        if (res.items && res.items.length > 1) {
+          const items = res.items.map((it) => ({
+            id: String(it.index),
+            title: it.title || `Story #${it.index}`,
+            thumbnail: it.thumbnail,
+            duration: it.duration ? `${Math.round(it.duration)}s` : undefined,
+          }));
+          setPreviewItems(items);
+          setSelectedIds(new Set()); // start empty so user explicitly chooses
+          setIsSheetOpen(true);
+          setStatusMessage(null);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Single item download
+      setStatusMessage("Queuing download...");
+      await createJob(url);
+      setStatusMessage("Download started! Media will never expire.");
+      setTimeout(() => setStatusMessage(null), 4000);
+    } catch (err: any) {
+      console.error(err);
+      setStatusMessage(`Error: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedIds(next);
+  };
+
+  const handleSelectAll = () => {
+    setSelectedIds(new Set(previewItems.map((i) => i.id)));
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleDownloadSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setIsLoading(true);
+    setStatusMessage(`Queuing ${selectedIds.size} stories...`);
+    try {
+      await createJob(currentUrl, Array.from(selectedIds));
+      setIsSheetOpen(false);
+      setStatusMessage(`Successfully queued ${selectedIds.size} downloads!`);
+      setTimeout(() => setStatusMessage(null), 5000);
+    } catch (err: any) {
+      console.error(err);
+      setStatusMessage(`Error: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -44,6 +122,13 @@ export const Home = () => {
         {/* Input Section */}
         <div className="w-full space-y-6 pt-4">
           <LiquidInput onSubmitUrl={handleDownload} />
+
+          {statusMessage && (
+            <div className="flex items-center justify-center gap-2 p-3 rounded-xl bg-white/10 border border-teal-400/30 text-teal-300 text-sm font-medium">
+              {isLoading && <Loader2 className="w-4 h-4 animate-spin text-teal-400" />}
+              <span>{statusMessage}</span>
+            </div>
+          )}
 
           {/* Feature Tags */}
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -129,6 +214,17 @@ export const Home = () => {
             ))}
           </div>
         </div>
+
+        <MediaPreviewSheet
+          isOpen={isSheetOpen}
+          onClose={() => setIsSheetOpen(false)}
+          items={previewItems}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onSelectAll={handleSelectAll}
+          onDeselectAll={handleDeselectAll}
+          onDownload={handleDownloadSelected}
+        />
 
       </div>
     </div>

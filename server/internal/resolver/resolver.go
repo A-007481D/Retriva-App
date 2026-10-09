@@ -24,3 +24,25 @@ type Resolver interface {
 	// and MUST ensure the final MediaInfo.URL passes SSRF validation.
 	Resolve(ctx context.Context, rawURL string) (*MediaInfo, error)
 }
+
+// PlaylistItem represents one item in a playlist or highlight.
+type PlaylistItem struct {
+	Index     int     `json:"index"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Duration  float64 `json:"duration"`
+	Timestamp int64   `json:"timestamp"`
+	Thumbnail string  `json:"thumbnail"`
+}
+
+// PlaylistInfo represents metadata about an entire playlist or highlight.
+type PlaylistInfo struct {
+	Title string         `json:"title"`
+	Count int            `json:"count"`
+	Items []PlaylistItem `json:"items"`
+}
+
+// Inspector is an optional interface that resolvers can implement to inspect playlist/highlight items.
+type Inspector interface {
+	Inspect(ctx context.Context, rawURL string) (*PlaylistInfo, error)
+}

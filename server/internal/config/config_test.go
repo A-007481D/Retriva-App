@@ -64,8 +64,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Workers != 2 {
 		t.Errorf("Workers: got %d, want 2", cfg.Workers)
 	}
-	if cfg.RetentionDays != 7 {
-		t.Errorf("RetentionDays: got %d, want 7", cfg.RetentionDays)
+	if cfg.RetentionDays != 0 {
+		t.Errorf("RetentionDays: got %d, want 0", cfg.RetentionDays)
 	}
 	if cfg.RequestTimeout != 30*time.Second {
 		t.Errorf("RequestTimeout: got %v, want 30s", cfg.RequestTimeout)
@@ -84,6 +84,8 @@ func TestLoad_Validation(t *testing.T) {
 	}{
 		{"invalid port", "RETRIVA_PORT", "99999", true},
 		{"zero workers", "RETRIVA_WORKERS", "0", true},
+		{"negative retention", "RETRIVA_RETENTION_DAYS", "-1", true},
+		{"zero retention", "RETRIVA_RETENTION_DAYS", "0", false},
 		{"bad log level", "RETRIVA_LOG_LEVEL", "verbose", true},
 		{"bad timeout", "RETRIVA_REQUEST_TIMEOUT", "notaduration", true},
 		{"valid debug level", "RETRIVA_LOG_LEVEL", "debug", false},

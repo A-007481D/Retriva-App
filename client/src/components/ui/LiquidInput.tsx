@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, X, Download, ClipboardPaste } from "lucide-react";
+import { X, Download, ClipboardPaste } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 interface LiquidInputProps extends React.InputHTMLAttributes<HTMLInputElement> {

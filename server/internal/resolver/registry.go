@@ -31,3 +31,16 @@ func (r *Registry) Resolve(ctx context.Context, rawURL string) (*MediaInfo, erro
 	}
 	return nil, ErrUnsupportedSource
 }
+
+// Inspect finds the first resolver implementing Inspector that can handle the URL.
+// Returns ErrUnsupportedSource if no inspector matches.
+func (r *Registry) Inspect(ctx context.Context, rawURL string) (*PlaylistInfo, error) {
+	for _, res := range r.resolvers {
+		if res.CanHandle(rawURL) {
+			if insp, ok := res.(Inspector); ok {
+				return insp.Inspect(ctx, rawURL)
+			}
+		}
+	}
+	return nil, ErrUnsupportedSource
+}
