@@ -32,6 +32,8 @@ const PLATFORMS = [
 
 export const Home: React.FC = () => {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [sheetTitle, setSheetTitle] = useState<string>("Collection Media");
+  const [sheetSubtitle, setSheetSubtitle] = useState<string>("Pick individual items or use filters to download videos and photos");
   const [previewItems, setPreviewItems] = useState<MediaItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentUrl, setCurrentUrl] = useState("");
@@ -61,24 +63,47 @@ export const Home: React.FC = () => {
     setCurrentUrl(url);
 
     try {
-      // Check if it's a highlight or playlist
-      if (url.includes("/stories/highlights/") || url.includes("playlist")) {
-        setStatus({ type: "info", message: "Fetching highlight metadata and stories..." });
-        const res = await inspectUrl(url);
-        if (res.items && res.items.length > 0) {
-          const items: MediaItem[] = res.items.map((it) => ({
-            id: String(it.index),
-            type: it.type || (it.duration ? "video" : "photo"),
-            title: it.title || `Story #${it.index}`,
-            thumbnail: it.thumbnail,
-            duration: it.duration ? `${Math.round(it.duration)}s` : undefined,
-          }));
-          setPreviewItems(items);
-          setSelectedIds(new Set()); // start clean so user explicitly chooses
-          setIsSheetOpen(true);
-          setStatus(null);
-          setIsLoading(false);
-          return;
+      const isInstagram = url.includes("instagram.com");
+      const isHighlight = isInstagram && (url.includes("/stories/highlights/") || url.includes("/highlights/"));
+      const isPostOrReel = isInstagram && (url.includes("/p/") || url.includes("/reel/") || url.includes("/reels/") || url.includes("/tv/"));
+      const isPlaylist = url.includes("playlist");
+
+      // Multi-item inspection (carousels, highlights, albums)
+      if (isHighlight || isPostOrReel || isPlaylist) {
+        setStatus({ type: "info", message: "Inspecting media metadata..." });
+        try {
+          const res = await inspectUrl(url);
+          if (res.items && res.items.length > 1) {
+            const items: MediaItem[] = res.items.map((it) => ({
+              id: String(it.index),
+              type: it.type || (it.duration ? "video" : "photo"),
+              title: it.title || `Item #${it.index}`,
+              thumbnail: it.thumbnail,
+              duration: it.duration ? `${Math.round(it.duration)}s` : undefined,
+            }));
+            setPreviewItems(items);
+            setSheetTitle(res.title || (isPostOrReel ? "Instagram Post & Carousel" : "Highlight Stories"));
+            setSheetSubtitle(
+              isPostOrReel
+                ? "Select slides to download photos and videos locally"
+                : "Pick individual stories or use filters to download videos and photos"
+            );
+
+            // If a specific slide was targeted (e.g. ?img_index=2), pre-select it
+            const matchIndex = url.match(/[?&](?:img_index|item|index)=(\d+)/);
+            if (matchIndex && matchIndex[1]) {
+              setSelectedIds(new Set([matchIndex[1]]));
+            } else {
+              setSelectedIds(new Set());
+            }
+
+            setIsSheetOpen(true);
+            setStatus(null);
+            setIsLoading(false);
+            return;
+          }
+        } catch (inspectErr) {
+          console.warn("Inspection skipped or single item, falling back to direct download:", inspectErr);
         }
       }
 
@@ -126,14 +151,15 @@ export const Home: React.FC = () => {
 
   const handleDownloadSelected = async () => {
     if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
     setIsLoading(true);
-    setStatus({ type: "info", message: `Queuing ${selectedIds.size} stories...` });
+    setStatus({ type: "info", message: `Queuing ${count} item${count > 1 ? "s" : ""}...` });
     try {
       await createJob(currentUrl, Array.from(selectedIds));
       setIsSheetOpen(false);
       setStatus({
         type: "success",
-        message: `Queued ${selectedIds.size} downloads! Saving permanently to your Vault.`,
+        message: `Queued ${count} download${count > 1 ? "s" : ""}! Saving permanently to your Vault.`,
       });
       setTimeout(() => {
         setStatus(null);
@@ -311,6 +337,8 @@ export const Home: React.FC = () => {
       <MediaPreviewSheet
         isOpen={isSheetOpen}
         onClose={() => setIsSheetOpen(false)}
+        title={sheetTitle}
+        subtitle={sheetSubtitle}
         items={previewItems}
         selectedIds={selectedIds}
         onToggleSelect={handleToggleSelect}

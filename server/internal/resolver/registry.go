@@ -21,26 +21,42 @@ func NewRegistry(resolvers ...Resolver) *Registry {
 	}
 }
 
-// Resolve finds the first resolver that can handle the URL and calls it.
-// Returns ErrUnsupportedSource if no resolver matches.
+// Resolve finds resolvers that can handle the URL and calls them in order.
+// If a resolver fails, it attempts subsequent candidate resolvers before returning the error.
 func (r *Registry) Resolve(ctx context.Context, rawURL string) (*MediaInfo, error) {
+	var lastErr error
 	for _, res := range r.resolvers {
 		if res.CanHandle(rawURL) {
-			return res.Resolve(ctx, rawURL)
+			info, err := res.Resolve(ctx, rawURL)
+			if err == nil {
+				return info, nil
+			}
+			lastErr = err
 		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
 	}
 	return nil, ErrUnsupportedSource
 }
 
-// Inspect finds the first resolver implementing Inspector that can handle the URL.
-// Returns ErrUnsupportedSource if no inspector matches.
+// Inspect finds resolvers implementing Inspector that can handle the URL.
+// If an inspector fails, it attempts subsequent candidate inspectors before returning the error.
 func (r *Registry) Inspect(ctx context.Context, rawURL string) (*PlaylistInfo, error) {
+	var lastErr error
 	for _, res := range r.resolvers {
 		if res.CanHandle(rawURL) {
 			if insp, ok := res.(Inspector); ok {
-				return insp.Inspect(ctx, rawURL)
+				info, err := insp.Inspect(ctx, rawURL)
+				if err == nil {
+					return info, nil
+				}
+				lastErr = err
 			}
 		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
 	}
 	return nil, ErrUnsupportedSource
 }

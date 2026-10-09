@@ -15,6 +15,8 @@ export interface MediaItem {
 interface MediaPreviewSheetProps {
   isOpen: boolean;
   onClose: () => void;
+  title?: string;
+  subtitle?: string;
   items: MediaItem[];
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
@@ -27,6 +29,8 @@ interface MediaPreviewSheetProps {
 export const MediaPreviewSheet: React.FC<MediaPreviewSheetProps> = ({
   isOpen,
   onClose,
+  title,
+  subtitle,
   items,
   selectedIds,
   onToggleSelect,
@@ -98,13 +102,13 @@ export const MediaPreviewSheet: React.FC<MediaPreviewSheetProps> = ({
             <div className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5">
               <div>
                 <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <span>Highlight Stories</span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-medium font-mono">
+                  <span className="truncate max-w-[280px] sm:max-w-md">{title || "Collection Media"}</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-medium font-mono shrink-0">
                     {items.length} total
                   </span>
                 </h3>
                 <p className="text-xs text-white/50 mt-0.5">
-                  Pick individual stories or use filters to download videos and photos
+                  {subtitle || "Pick individual items or use filters to download videos and photos"}
                 </p>
               </div>
 
