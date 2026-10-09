@@ -63,7 +63,7 @@ func (r *Resolver) Resolve(ctx context.Context, rawURL string) (*resolver.MediaI
 	}
 
 	// Add a common User-Agent to avoid generic blocks
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; RetrivaBot/1.0)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 	resp, err := r.client.Do(req)
 	if err != nil {

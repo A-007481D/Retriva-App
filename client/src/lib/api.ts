@@ -85,8 +85,8 @@ export async function getJobs(): Promise<{items: Job[]}> {
   return res.json()
 }
 
-export async function getVault(): Promise<{items: Media[]}> {
-  const res = await fetch(`${API_BASE}/vault`)
+export async function getVault(limit: number = 1000, offset: number = 0): Promise<{items: Media[], total: number}> {
+  const res = await fetch(`${API_BASE}/vault?limit=${limit}&offset=${offset}`)
   if (!res.ok) throw new Error('Failed to fetch vault')
   return res.json()
 }

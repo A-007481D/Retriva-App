@@ -13,7 +13,7 @@ export const Navbar: React.FC = () => {
       try {
         const res = await getVault();
         if (isMounted) {
-          setVaultCount(res.items ? res.items.length : 0);
+          setVaultCount(res.total ?? (res.items ? res.items.length : 0));
         }
       } catch {
         // silent fail

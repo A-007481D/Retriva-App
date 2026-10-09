@@ -38,7 +38,7 @@ func (d *HTTPDownloader) Download(ctx context.Context, info *resolver.MediaInfo,
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; RetrivaBot/1.0)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 	resp, err := d.client.Do(req)
 	if err != nil {

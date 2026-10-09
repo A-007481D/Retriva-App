@@ -18,8 +18,10 @@ func (h *Handler) handleListVault(w http.ResponseWriter, r *http.Request) {
 	offsetStr := r.URL.Query().Get("offset")
 
 	limit, _ := strconv.Atoi(limitStr)
-	if limit <= 0 || limit > 100 {
-		limit = 50
+	if limit <= 0 {
+		limit = 1000
+	} else if limit > 10000 {
+		limit = 10000
 	}
 
 	offset, _ := strconv.Atoi(offsetStr)

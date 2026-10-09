@@ -51,12 +51,15 @@ export const Vault: React.FC = () => {
   const [selectedMedia, setSelectedMedia] = useState<Media | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const [totalCount, setTotalCount] = useState<number>(0);
+
   const fetchItems = async () => {
     setIsLoading(true);
     setError(null);
     try {
       const res = await getVault();
       setItems(res.items || []);
+      setTotalCount(res.total ?? (res.items ? res.items.length : 0));
     } catch (err: any) {
       setError(err.message || "Failed to load vault media");
     } finally {
@@ -136,7 +139,7 @@ export const Vault: React.FC = () => {
             <FolderArchive className="w-4 h-4 text-emerald-400" />
             <div className="flex flex-col">
               <span className="text-[10px] text-zinc-500 font-mono uppercase">Total Files</span>
-              <span className="text-xs font-bold text-white font-mono">{items.length}</span>
+              <span className="text-xs font-bold text-white font-mono">{totalCount || items.length}</span>
             </div>
           </div>
 
