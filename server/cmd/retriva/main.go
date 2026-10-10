@@ -63,6 +63,11 @@ func run() error {
 	mediaRepo := media.NewSQLiteRepository(db.DB)
 	historyRepo := history.NewSQLiteRepository(db.DB)
 
+	// Clean up any jobs left interrupted from a prior server shutdown
+	if err := jobsRepo.FailOrphaned(context.Background()); err != nil {
+		logger.Warn("failed to clean up orphaned jobs", slog.Any("error", err))
+	}
+
 	// Initialize resolver and downloader
 	// Priority: 1. Direct, 2. Instagram, 3. YtDlp
 	resRegistry := resolver.NewRegistry(
@@ -70,7 +75,7 @@ func run() error {
 		instagram.New(cfg.YtDlpCookies),
 		ytdlp.New(cfg.YtDlpPath, cfg.YtDlpCookies),
 	)
-	dl := downloader.NewHTTPDownloader(store, 30*time.Second, 1024*1024*1024, 5) // 1GB max
+	dl := downloader.NewHTTPDownloader(store, cfg.DownloadTimeout, cfg.MaxFileSizeBytes, cfg.MaxRedirects)
 
 	// Initialize executor and worker pool
 	exec := jobs.NewExecutor(resRegistry, dl, jobsRepo, mediaRepo, historyRepo, logger)

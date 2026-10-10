@@ -30,8 +30,9 @@ type Job struct {
 	CreatedAt  time.Time  `json:"createdAt"`
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	// SourceURL is stored client-side only; not persisted to DB.
+	// SourceURL and Filename are populated from media when available.
 	SourceURL string `json:"sourceUrl,omitempty"`
+	Filename  string `json:"filename,omitempty"`
 }
 
 // IsTerminal reports whether the job has reached a final state.
@@ -50,4 +51,5 @@ type Repository interface {
 	Update(ctx context.Context, job *Job) error
 	ListPending(ctx context.Context) ([]*Job, error)
 	Cancel(ctx context.Context, id string) error
+	FailOrphaned(ctx context.Context) error
 }

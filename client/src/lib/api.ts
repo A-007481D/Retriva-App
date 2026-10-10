@@ -4,12 +4,17 @@ const API_BASE = '/api/v1'
 
 export interface Job {
   id: string
-  media_id: string
+  mediaId?: string
+  media_id?: string
   type: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
+  status: 'queued' | 'resolving' | 'downloading' | 'completed' | 'failed' | 'cancelled'
   progress: number
-  created_at: string
-  source_url: string
+  error?: string | null
+  createdAt?: string
+  startedAt?: string
+  finishedAt?: string
+  sourceUrl?: string
+  filename?: string
 }
 
 export interface Media {
@@ -79,19 +84,25 @@ export async function createJob(url: string, items?: string[]): Promise<any> {
   return res.json()
 }
 
-export async function getJobs(): Promise<{items: Job[]}> {
+export async function getJobs(): Promise<{ jobs: Job[] }> {
   const res = await fetch(`${API_BASE}/jobs`)
   if (!res.ok) throw new Error('Failed to fetch jobs')
   return res.json()
 }
 
-export async function getVault(limit: number = 1000, offset: number = 0): Promise<{items: Media[], total: number}> {
+export async function getJob(id: string): Promise<Job> {
+  const res = await fetch(`${API_BASE}/jobs/${id}`)
+  if (!res.ok) throw new Error('Failed to fetch job')
+  return res.json()
+}
+
+export async function getVault(limit: number = 1000, offset: number = 0): Promise<{ items: Media[]; total: number }> {
   const res = await fetch(`${API_BASE}/vault?limit=${limit}&offset=${offset}`)
   if (!res.ok) throw new Error('Failed to fetch vault')
   return res.json()
 }
 
-export async function getHistory(): Promise<{items: Job[]}> {
+export async function getHistory(): Promise<{ items: Job[] }> {
   const res = await fetch(`${API_BASE}/history`)
   if (!res.ok) throw new Error('Failed to fetch history')
   return res.json()

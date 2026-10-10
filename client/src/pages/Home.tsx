@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { LiquidInput } from "../components/ui/LiquidInput";
 import { MediaPreviewSheet, type MediaItem } from "../components/ui/MediaPreviewSheet";
-import { createJob, inspectUrl, getVault, getMediaFileUrl, type Media } from "../lib/api";
+import { ActiveJobsTracker } from "../components/ui/ActiveJobsTracker";
+import {
+  createJob,
+  inspectUrl,
+  getVault,
+  getMediaFileUrl,
+  getJobs,
+  getJob,
+  type Media,
+  type Job,
+} from "../lib/api";
 import {
   Sparkles,
   Camera,
@@ -40,6 +50,7 @@ export const Home: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<{ type: "info" | "success" | "error"; message: string } | null>(null);
   const [recentVault, setRecentVault] = useState<Media[]>([]);
+  const [trackedJobs, setTrackedJobs] = useState<Job[]>([]);
 
   const fetchRecentVault = async () => {
     try {
@@ -52,9 +63,104 @@ export const Home: React.FC = () => {
     }
   };
 
+  const fetchActiveJobs = async () => {
+    try {
+      const res = await getJobs();
+      if (res.jobs && res.jobs.length > 0) {
+        setTrackedJobs((prev) => {
+          const map = new Map(prev.map((j) => [j.id, j]));
+          res.jobs.forEach((j) => map.set(j.id, j));
+          return Array.from(map.values());
+        });
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     fetchRecentVault();
+    fetchActiveJobs();
   }, []);
+
+  const hasActiveJobs = trackedJobs.some(
+    (j) => j.status === "queued" || j.status === "resolving" || j.status === "downloading"
+  );
+
+  useEffect(() => {
+    if (!hasActiveJobs) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await getJobs();
+        const pendingList = res.jobs || [];
+        const pendingMap = new Map(pendingList.map((j) => [j.id, j]));
+
+        let vaultNeedsRefresh = false;
+
+        const updated = await Promise.all(
+          trackedJobs.map(async (job) => {
+            const wasPending =
+              job.status === "queued" ||
+              job.status === "resolving" ||
+              job.status === "downloading";
+            if (!wasPending) return job;
+
+            if (pendingMap.has(job.id)) {
+              return { ...job, ...pendingMap.get(job.id)! };
+            }
+
+            // Job finished (or failed) — fetch final status
+            try {
+              const finished = await getJob(job.id);
+              if (finished.status === "completed") {
+                vaultNeedsRefresh = true;
+              }
+              return { ...job, ...finished };
+            } catch {
+              return job;
+            }
+          })
+        );
+
+        setTrackedJobs(updated);
+        if (vaultNeedsRefresh) {
+          fetchRecentVault();
+        }
+      } catch (err) {
+        console.warn("Poll active jobs error:", err);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [hasActiveJobs, trackedJobs]);
+
+  const handleDismissJob = (id: string) => {
+    setTrackedJobs((prev) => prev.filter((j) => j.id !== id));
+  };
+
+  const handleClearFinished = () => {
+    setTrackedJobs((prev) =>
+      prev.filter(
+        (j) => j.status === "queued" || j.status === "resolving" || j.status === "downloading"
+      )
+    );
+  };
+
+  const handleRetryJob = async (job: Job) => {
+    const retryUrl = job.sourceUrl || currentUrl;
+    if (!retryUrl) return;
+    try {
+      const res = await createJob(retryUrl);
+      const newJobs: Job[] = res.jobs ? res.jobs : [res];
+      setTrackedJobs((prev) => {
+        const filtered = prev.filter((j) => j.id !== job.id);
+        return [...newJobs, ...filtered];
+      });
+    } catch (err: any) {
+      setStatus({ type: "error", message: err.message || "Failed to retry download" });
+    }
+  };
 
   const handleDownload = async (url: string) => {
     if (!url.trim()) return;
@@ -109,12 +215,13 @@ export const Home: React.FC = () => {
 
       // Single item download
       setStatus({ type: "info", message: "Queuing media download..." });
-      await createJob(url);
-      setStatus({ type: "success", message: "Download queued successfully! Media saved to permanent vault." });
-      setTimeout(() => {
-        setStatus(null);
-        fetchRecentVault();
-      }, 4000);
+      const jobRes = await createJob(url);
+      const newJobs: Job[] = jobRes.jobs ? jobRes.jobs : [jobRes];
+      setTrackedJobs((prev) => {
+        const ids = new Set(newJobs.map((j) => j.id));
+        return [...newJobs, ...prev.filter((j) => !ids.has(j.id))];
+      });
+      setStatus(null);
     } catch (err: any) {
       console.error(err);
       setStatus({ type: "error", message: err.message || "Failed to process URL" });
@@ -155,16 +262,14 @@ export const Home: React.FC = () => {
     setIsLoading(true);
     setStatus({ type: "info", message: `Queuing ${count} item${count > 1 ? "s" : ""}...` });
     try {
-      await createJob(currentUrl, Array.from(selectedIds));
+      const jobRes = await createJob(currentUrl, Array.from(selectedIds));
       setIsSheetOpen(false);
-      setStatus({
-        type: "success",
-        message: `Queued ${count} download${count > 1 ? "s" : ""}! Saving permanently to your Vault.`,
+      const newJobs: Job[] = jobRes.jobs ? jobRes.jobs : [jobRes];
+      setTrackedJobs((prev) => {
+        const ids = new Set(newJobs.map((j) => j.id));
+        return [...newJobs, ...prev.filter((j) => !ids.has(j.id))];
       });
-      setTimeout(() => {
-        setStatus(null);
-        fetchRecentVault();
-      }, 5000);
+      setStatus(null);
     } catch (err: any) {
       console.error(err);
       setStatus({ type: "error", message: err.message || "Failed to queue selected downloads" });
@@ -233,6 +338,14 @@ export const Home: React.FC = () => {
             })}
           </div>
         </div>
+
+        {/* Active Transfers & Live Download Activity */}
+        <ActiveJobsTracker
+          jobs={trackedJobs}
+          onDismiss={handleDismissJob}
+          onRetry={handleRetryJob}
+          onClearFinished={handleClearFinished}
+        />
 
         {/* Recent Vault Additions Strip */}
         {recentVault.length > 0 && (

@@ -21,6 +21,7 @@ func (m *mockJobsRepo) Get(ctx context.Context, id string) (*Job, error) { retur
 func (m *mockJobsRepo) Update(ctx context.Context, job *Job) error       { m.Job = job; return nil }
 func (m *mockJobsRepo) ListPending(ctx context.Context) ([]*Job, error)  { return nil, nil }
 func (m *mockJobsRepo) Cancel(ctx context.Context, id string) error      { return nil }
+func (m *mockJobsRepo) FailOrphaned(ctx context.Context) error            { return nil }
 
 type mockMediaRepo struct {
 	Item *media.Item

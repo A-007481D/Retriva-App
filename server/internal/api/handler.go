@@ -86,6 +86,7 @@ func (h *Handler) registerRoutes() {
 	// API v1 (Auth Protected)
 	h.mux.Handle("POST /api/v1/jobs", h.requireAuth(http.HandlerFunc(h.handleCreateJob)))
 	h.mux.Handle("GET /api/v1/jobs", h.requireAuth(http.HandlerFunc(h.handleListJobs)))
+	h.mux.Handle("GET /api/v1/jobs/{id}", h.requireAuth(http.HandlerFunc(h.handleGetJob)))
 	h.mux.Handle("POST /api/v1/inspect", h.requireAuth(http.HandlerFunc(h.handleInspect)))
 	h.mux.Handle("GET /api/v1/inspect", h.requireAuth(http.HandlerFunc(h.handleInspect)))
 	h.mux.Handle("GET /api/v1/history", h.requireAuth(http.HandlerFunc(h.handleListHistory)))

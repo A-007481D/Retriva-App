@@ -32,8 +32,12 @@ func (r *SQLiteRepository) Create(ctx context.Context, job *Job) error {
 
 func (r *SQLiteRepository) Get(ctx context.Context, id string) (*Job, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, media_id, type, status, progress, error, created_at, started_at, finished_at
-		FROM jobs WHERE id = ?`, id)
+		SELECT j.id, j.media_id, j.type, j.status, j.progress, j.error,
+		       j.created_at, j.started_at, j.finished_at,
+		       COALESCE(m.source_url, ''), COALESCE(m.filename, '')
+		FROM jobs j
+		LEFT JOIN media m ON j.media_id = m.id
+		WHERE j.id = ?`, id)
 
 	job, err := scanJob(row)
 	if err == sql.ErrNoRows {
@@ -73,9 +77,13 @@ func (r *SQLiteRepository) Update(ctx context.Context, job *Job) error {
 
 func (r *SQLiteRepository) ListPending(ctx context.Context) ([]*Job, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, media_id, type, status, progress, error, created_at, started_at, finished_at
-		FROM jobs WHERE status IN ('queued', 'resolving', 'downloading')
-		ORDER BY created_at ASC`)
+		SELECT j.id, j.media_id, j.type, j.status, j.progress, j.error,
+		       j.created_at, j.started_at, j.finished_at,
+		       COALESCE(m.source_url, ''), COALESCE(m.filename, '')
+		FROM jobs j
+		LEFT JOIN media m ON j.media_id = m.id
+		WHERE j.status IN ('queued', 'resolving', 'downloading')
+		ORDER BY j.created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("jobs.ListPending: %w", err)
 	}
@@ -105,6 +113,20 @@ func (r *SQLiteRepository) Cancel(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *SQLiteRepository) FailOrphaned(ctx context.Context) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	errMsg := "interrupted by server restart"
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE jobs SET status = ?, error = ?, finished_at = ?
+		WHERE status IN ('queued', 'resolving', 'downloading')`,
+		StatusFailed, errMsg, now,
+	)
+	if err != nil {
+		return fmt.Errorf("jobs.FailOrphaned: %w", err)
+	}
+	return nil
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 type rowScanner interface {
@@ -125,10 +147,12 @@ func scanJobInternal(s rowScanner) (*Job, error) {
 	var errStr sql.NullString
 	var createdAt string
 	var startedAt, finishedAt sql.NullString
+	var sourceURL, filename sql.NullString
 
 	err := s.Scan(
 		&job.ID, &mediaID, &job.Type, &job.Status, &job.Progress, &errStr,
 		&createdAt, &startedAt, &finishedAt,
+		&sourceURL, &filename,
 	)
 	if err != nil {
 		return nil, err
@@ -148,6 +172,12 @@ func scanJobInternal(s rowScanner) (*Job, error) {
 	if finishedAt.Valid {
 		t, _ := time.Parse(time.RFC3339, finishedAt.String)
 		job.FinishedAt = &t
+	}
+	if sourceURL.Valid {
+		job.SourceURL = sourceURL.String
+	}
+	if filename.Valid {
+		job.Filename = filename.String
 	}
 
 	return &job, nil

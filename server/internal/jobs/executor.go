@@ -82,7 +82,14 @@ func (e *DefaultExecutor) Execute(ctx context.Context, job *Job) error {
 		return failJob(fmt.Errorf("resolve failed: %w", err))
 	}
 	
-	// Update media with early info (e.g. filename) if we want, but we can wait until download finishes.
+	// Update media with early resolved info so queries reflect filename while downloading
+	if info.Filename != "" {
+		m.Filename = info.Filename
+		if info.MIMEType != "" {
+			m.MIMEType = info.MIMEType
+		}
+		_ = e.mediaRepo.Update(ctx, m)
+	}
 
 	// 3. Mark downloading
 	job.Status = StatusDownloading

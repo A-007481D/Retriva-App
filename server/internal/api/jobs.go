@@ -159,3 +159,25 @@ func (h *Handler) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		"jobs": pending,
 	})
 }
+
+func (h *Handler) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing_id", "Job ID is required")
+		return
+	}
+
+	job, err := h.jobsRepo.Get(r.Context(), id)
+	if err != nil {
+		h.logger.Error("failed to get job", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "db_error", "Failed to get job")
+		return
+	}
+
+	if job == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Job not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, job)
+}
