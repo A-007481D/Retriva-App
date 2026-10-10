@@ -3,23 +3,21 @@
 # Stage 1: Build web frontend
 # =============================================================================
 FROM node:22-alpine AS web-builder
-WORKDIR /app/web
-COPY web/package*.json ./
+WORKDIR /app/client
+COPY client/package*.json ./
 RUN npm ci --silent
-COPY web/ ./
+COPY client/ ./
 RUN npm run build
 
 # =============================================================================
-# Stage 2: Build Go server (embeds the frontend)
+# Stage 2: Build Go server
 # =============================================================================
-FROM golang:1.23-alpine AS server-builder
+FROM golang:alpine AS server-builder
 RUN apk add --no-cache git
 WORKDIR /app/server
 COPY server/go.* ./
 RUN go mod download
 COPY server/ ./
-# Embed the built frontend into the binary via go:embed
-COPY --from=web-builder /app/web/dist ./static
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
@@ -32,15 +30,24 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -g 1001 -S retriva && \
-    adduser -u 1001 -S -G retriva retriva
+    adduser -u 1001 -S -G retriva retriva && \
+    mkdir -p /data && \
+    chown -R retriva:retriva /data
 
+WORKDIR /app
 COPY --from=server-builder /retriva /usr/local/bin/retriva
+COPY --from=web-builder /app/client/dist /app/client/dist
 
 USER retriva
 VOLUME ["/data"]
 EXPOSE 8080
 
+ENV RETRIVA_PORT=8080 \
+    RETRIVA_DATA_DIR=/data \
+    RETRIVA_DATABASE=/data/retriva.db \
+    RETRIVA_STATIC_DIR=/app/client/dist
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget -qO- http://localhost:8080/health || exit 1
+    CMD wget -qO- http://localhost:${RETRIVA_PORT:-8080}/health || exit 1
 
 ENTRYPOINT ["retriva"]

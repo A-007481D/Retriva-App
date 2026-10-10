@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+node_modules
+client/node_modules
+client/dist
+web/node_modules
+web/dist
+data/
+data/*
+bin/
+bin/*
+*.db
+*.db-journal
+*.log

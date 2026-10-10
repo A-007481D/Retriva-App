@@ -98,12 +98,17 @@ func (h *Handler) registerRoutes() {
 
 	// Serve static frontend files (SPA fallback to index.html)
 	candidates := []string{
+		os.Getenv("RETRIVA_STATIC_DIR"),
 		"client/dist",
 		"../client/dist",
 		"../../client/dist",
+		"/app/client/dist",
 	}
 	distDir := ""
 	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
 		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
 			distDir = c
 			break
