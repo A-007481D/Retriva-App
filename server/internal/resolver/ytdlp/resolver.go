@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 
@@ -33,11 +34,11 @@ func New(binPath, cookies string) *Resolver {
 }
 
 // CanHandle returns true if yt-dlp can handle the URL.
-// Since yt-dlp handles hundreds of sites, we let it try anything that is a valid URL
+// Since yt-dlp handles hundreds of sites, we let it try anything that is a valid HTTP(S) URL
 // but we prioritize it after the DirectResolver.
 func (r *Resolver) CanHandle(rawURL string) bool {
-	_, err := security.ValidateURL(context.Background(), rawURL)
-	return err == nil
+	u, err := url.ParseRequestURI(rawURL)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // Resolve shells out to yt-dlp to extract the direct URL and metadata.
@@ -284,6 +285,24 @@ func (r *Resolver) Inspect(ctx context.Context, rawURL string) (*resolver.Playli
 
 	if playlistTitle == "" && len(items) > 0 {
 		playlistTitle = items[0].Title
+	}
+
+	if len(items) == 0 {
+		// Fallback: If yt-dlp flat-playlist yielded no items, resolve the single media
+		mediaInfo, err := r.Resolve(ctx, rawURL)
+		if err == nil && mediaInfo != nil {
+			return &resolver.PlaylistInfo{
+				Title: mediaInfo.Filename,
+				Count: 1,
+				Items: []resolver.PlaylistItem{
+					{
+						Index: 1,
+						ID:    "1",
+						Title: mediaInfo.Filename,
+					},
+				},
+			}, nil
+		}
 	}
 
 	return &resolver.PlaylistInfo{

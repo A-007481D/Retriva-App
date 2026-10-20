@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -122,10 +123,27 @@ func Load() (*Config, error) {
 
 	cfg.AuthToken = envStr("RETRIVA_AUTH_TOKEN", "")
 
-	cfg.YtDlpPath = envStr("RETRIVA_YTDLP_PATH", "yt-dlp")
+	ytDlpPath := envStr("RETRIVA_YTDLP_PATH", "yt-dlp")
+	if ytDlpPath == "yt-dlp" {
+		if _, err := exec.LookPath("yt-dlp"); err != nil {
+			homeDir, _ := os.UserHomeDir()
+			candidates := []string{
+				filepath.Join(homeDir, ".local", "bin", "yt-dlp"),
+				"/usr/local/bin/yt-dlp",
+				"/usr/bin/yt-dlp",
+			}
+			for _, cand := range candidates {
+				if _, err := os.Stat(cand); err == nil {
+					ytDlpPath = cand
+					break
+				}
+			}
+		}
+	}
+	cfg.YtDlpPath = ytDlpPath
 
 	defaultCookies := ""
-	for _, candidate := range []string{"data/cookies.txt", "../data/cookies.txt", "cookies.txt", "/data/cookies.txt"} {
+	for _, candidate := range []string{"data/cookies.txt", "../data/cookies.txt", "server/cookies.txt", "../server/cookies.txt", "cookies.txt", "/data/cookies.txt"} {
 		if _, err := os.Stat(candidate); err == nil {
 			if abs, err := filepath.Abs(candidate); err == nil {
 				defaultCookies = abs

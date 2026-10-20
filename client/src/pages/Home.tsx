@@ -28,6 +28,7 @@ import {
   AlertCircle,
   Video,
   Image as ImageIcon,
+  Send,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "../lib/utils";
@@ -35,6 +36,7 @@ import { cn } from "../lib/utils";
 const PLATFORMS = [
   { id: "instagram", label: "Instagram Stories & Highlights", icon: Camera, color: "text-pink-400" },
   { id: "reels", label: "Reels & Posts", icon: PlaySquare, color: "text-purple-400" },
+  { id: "telegram", label: "Telegram (t.me)", icon: Send, color: "text-sky-400" },
   { id: "youtube", label: "YouTube", icon: MonitorPlay, color: "text-red-400" },
   { id: "tiktok", label: "TikTok", icon: Music, color: "text-cyan-400" },
   { id: "twitter", label: "X (Twitter)", icon: Hash, color: "text-blue-400" },
@@ -162,54 +164,113 @@ export const Home: React.FC = () => {
     }
   };
 
-  const handleDownload = async (url: string) => {
-    if (!url.trim()) return;
+  const handleDownload = async (rawUrl: string) => {
+    let url = rawUrl.trim();
+    if (!url) return;
     setIsLoading(true);
     setStatus({ type: "info", message: "Inspecting source URL..." });
+
+    // Telegram Web URL normalization & validation
+    if (url.includes("web.telegram.org")) {
+      const channelOnlyMatch = url.match(/web\.telegram\.org\/(?:a|k)\/#(?:@|-100)(\d+)$/);
+      if (channelOnlyMatch) {
+        setStatus({
+          type: "error",
+          message:
+            "This is a Telegram Web channel view link, not a media post. In Telegram, right-click the video/message and select 'Copy Message Link' (e.g. https://t.me/channel/123).",
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      const msgMatch = url.match(/web\.telegram\.org\/(?:a|k)\/#-100(\d+)_(\d+)/);
+      if (msgMatch) {
+        url = `https://t.me/c/${msgMatch[1]}/${msgMatch[2]}`;
+      } else {
+        const publicMsgMatch = url.match(/web\.telegram\.org\/(?:a|k)\/#@([A-Za-z0-9_]+)_(\d+)/);
+        if (publicMsgMatch) {
+          url = `https://t.me/${publicMsgMatch[1]}/${publicMsgMatch[2]}`;
+        }
+      }
+    }
+
     setCurrentUrl(url);
 
     try {
       const isInstagram = url.includes("instagram.com");
       const isHighlight = isInstagram && (url.includes("/stories/highlights/") || url.includes("/highlights/"));
       const isPostOrReel = isInstagram && (url.includes("/p/") || url.includes("/reel/") || url.includes("/reels/") || url.includes("/tv/"));
+      const isStory = isInstagram && url.includes("/stories/") && !isHighlight;
       const isPlaylist = url.includes("playlist");
+      const isTelegram = url.includes("t.me/") || url.includes("telegram.me/");
 
-      // Multi-item inspection (carousels, highlights, albums)
-      if (isHighlight || isPostOrReel || isPlaylist) {
+      // Multi-item inspection (stories, carousels, highlights, albums)
+      if (isHighlight || isPostOrReel || isStory || isPlaylist || isTelegram) {
         setStatus({ type: "info", message: "Inspecting media metadata..." });
         try {
           const res = await inspectUrl(url);
-          if (res.items && res.items.length > 1) {
-            const items: MediaItem[] = res.items.map((it) => ({
-              id: String(it.index),
-              type: it.type || (it.duration ? "video" : "photo"),
-              title: it.title || `Item #${it.index}`,
-              thumbnail: it.thumbnail,
-              duration: it.duration ? `${Math.round(it.duration)}s` : undefined,
-            }));
-            setPreviewItems(items);
-            setSheetTitle(res.title || (isPostOrReel ? "Instagram Post & Carousel" : "Highlight Stories"));
-            setSheetSubtitle(
-              isPostOrReel
-                ? "Select slides to download photos and videos locally"
-                : "Pick individual stories or use filters to download videos and photos"
-            );
+          if (res.items && res.items.length > 0) {
+            if (res.items.length > 1 || isStory || isHighlight) {
+              const items: MediaItem[] = res.items.map((it) => ({
+                id: String(it.id || it.index),
+                type: it.type || (it.duration ? "video" : "photo"),
+                title: it.title || `Item #${it.index}`,
+                thumbnail: it.thumbnail,
+                duration: it.duration ? `${Math.round(it.duration)}s` : undefined,
+              }));
+              setPreviewItems(items);
 
-            // If a specific slide was targeted (e.g. ?img_index=2), pre-select it
-            const matchIndex = url.match(/[?&](?:img_index|item|index)=(\d+)/);
-            if (matchIndex && matchIndex[1]) {
-              setSelectedIds(new Set([matchIndex[1]]));
-            } else {
-              setSelectedIds(new Set());
+              let title = res.title;
+              if (!title) {
+                if (isStory) title = "Instagram Stories";
+                else if (isHighlight) title = "Highlight Stories";
+                else if (isPostOrReel) title = "Instagram Post & Carousel";
+                else if (isTelegram) title = "Telegram Media";
+                else title = "Collection Media";
+              }
+              setSheetTitle(title);
+              setSheetSubtitle(
+                isStory
+                  ? "Select which stories to download to your local vault"
+                  : isPostOrReel
+                  ? "Select slides to download photos and videos locally"
+                  : isTelegram
+                  ? "Select Telegram media items to download"
+                  : "Pick individual items or use filters to download videos and photos"
+              );
+
+              // Pre-selection:
+              const matchIndex = url.match(/[?&](?:img_index|item|index)=(\d+)/);
+              const matchStoryId = url.match(/\/stories\/[^/]+\/(\d+)/);
+
+              if (matchIndex && matchIndex[1]) {
+                setSelectedIds(new Set([matchIndex[1]]));
+              } else if (matchStoryId && matchStoryId[1]) {
+                const targetId = matchStoryId[1];
+                const matchedItem = items.find((it) => it.id === targetId || String(it.id) === targetId);
+                if (matchedItem) {
+                  setSelectedIds(new Set([matchedItem.id]));
+                } else {
+                  setSelectedIds(new Set());
+                }
+              } else {
+                // If url without singular ID (/stories/username/), show all unselected so user can pick
+                setSelectedIds(new Set());
+              }
+
+              setIsSheetOpen(true);
+              setStatus(null);
+              setIsLoading(false);
+              return;
             }
-
-            setIsSheetOpen(true);
-            setStatus(null);
+          }
+        } catch (inspectErr: any) {
+          console.warn("Inspection skipped or single item, falling back to direct download:", inspectErr);
+          if (inspectErr.message && (inspectErr.message.includes("login") || inspectErr.message.includes("cookie") || inspectErr.message.includes("authentication"))) {
+            setStatus({ type: "error", message: inspectErr.message });
             setIsLoading(false);
             return;
           }
-        } catch (inspectErr) {
-          console.warn("Inspection skipped or single item, falling back to direct download:", inspectErr);
         }
       }
 

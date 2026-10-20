@@ -23,8 +23,23 @@ import (
 var (
 	highlightRegex = regexp.MustCompile(`/(?:stories/)?highlights/(\d+)`)
 	postRegex      = regexp.MustCompile(`/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)`)
-	storyRegex     = regexp.MustCompile(`/stories/[^/]+/(\d+)`)
+	userStoryRegex = regexp.MustCompile(`/stories/([A-Za-z0-9_.]+)(?:/(\d+))?/?`)
 )
+
+type targetType int
+
+const (
+	targetHighlight targetType = iota
+	targetPost
+	targetStory
+)
+
+type igTarget struct {
+	Type     targetType
+	ID       string // highlightID, mediaID, or storyID
+	Username string // for user stories
+	StoryID  string // specific story ID if present in URL
+}
 
 const igAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
@@ -69,8 +84,10 @@ type igItem struct {
 	} `json:"image_versions2"`
 	VideoVersions []igVideoVersion `json:"video_versions"`
 	User          struct {
-		Username string `json:"username"`
-		FullName string `json:"full_name"`
+		PK       json.Number `json:"pk"`
+		ID       string      `json:"id"`
+		Username string      `json:"username"`
+		FullName string      `json:"full_name"`
 	} `json:"user"`
 	Caption struct {
 		Text string `json:"text"`
@@ -120,26 +137,42 @@ func (r *Resolver) CanHandle(rawURL string) bool {
 	}
 	return highlightRegex.MatchString(rawURL) ||
 		postRegex.MatchString(rawURL) ||
-		storyRegex.MatchString(rawURL) ||
-		strings.Contains(rawURL, "/stories/highlights/") ||
+		userStoryRegex.MatchString(rawURL) ||
+		strings.Contains(rawURL, "/stories/") ||
 		strings.Contains(rawURL, "/highlights/")
 }
 
-func (r *Resolver) extractTarget(rawURL string) (isHighlight bool, id string, err error) {
+func (r *Resolver) extractTarget(rawURL string) (*igTarget, error) {
 	if m := highlightRegex.FindStringSubmatch(rawURL); len(m) >= 2 {
-		return true, m[1], nil
+		return &igTarget{Type: targetHighlight, ID: m[1]}, nil
 	}
 	if m := postRegex.FindStringSubmatch(rawURL); len(m) >= 2 {
 		mediaID, err := shortcodeToMediaID(m[1])
 		if err != nil {
-			return false, "", err
+			return nil, err
 		}
-		return false, mediaID, nil
+		return &igTarget{Type: targetPost, ID: mediaID}, nil
 	}
-	if m := storyRegex.FindStringSubmatch(rawURL); len(m) >= 2 {
-		return false, m[1], nil
+	if m := userStoryRegex.FindStringSubmatch(rawURL); len(m) >= 2 {
+		user := m[1]
+		var storyID string
+		if len(m) >= 3 && m[2] != "" {
+			storyID = m[2]
+		}
+		if user == "highlights" {
+			if storyID != "" {
+				return &igTarget{Type: targetHighlight, ID: storyID}, nil
+			}
+			return nil, fmt.Errorf("missing highlight ID")
+		}
+		return &igTarget{
+			Type:     targetStory,
+			Username: user,
+			StoryID:  storyID,
+			ID:       storyID,
+		}, nil
 	}
-	return false, "", fmt.Errorf("could not identify Instagram media or highlight ID from URL")
+	return nil, fmt.Errorf("could not identify Instagram media, story, or highlight from URL")
 }
 
 func (r *Resolver) createHTTPClient() (*http.Client, error) {
@@ -179,6 +212,14 @@ func (r *Resolver) createHTTPClient() (*http.Client, error) {
 				u, err := url.Parse("https://" + strings.TrimPrefix(domain, "."))
 				if err == nil {
 					jar.SetCookies(u, []*http.Cookie{c})
+					if strings.Contains(domain, "instagram.com") {
+						if uWww, err := url.Parse("https://www.instagram.com"); err == nil {
+							jar.SetCookies(uWww, []*http.Cookie{c})
+						}
+						if uI, err := url.Parse("https://i.instagram.com"); err == nil {
+							jar.SetCookies(uI, []*http.Cookie{c})
+						}
+					}
 				}
 			}
 		}
@@ -269,22 +310,27 @@ func (r *Resolver) fetchMediaInfo(ctx context.Context, mediaID string) (*igItem,
 	return &data.Items[0], nil
 }
 
-// Inspect fetches metadata for highlights or multi-item posts/carousels.
+// Inspect fetches metadata for highlights, user stories, or multi-item posts/carousels.
 func (r *Resolver) Inspect(ctx context.Context, rawURL string) (*resolver.PlaylistInfo, error) {
 	if _, err := security.ValidateURL(ctx, rawURL); err != nil {
 		return nil, err
 	}
 
-	isHighlight, targetID, err := r.extractTarget(rawURL)
+	target, err := r.extractTarget(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	if isHighlight {
-		return r.inspectHighlight(ctx, targetID)
+	switch target.Type {
+	case targetHighlight:
+		return r.inspectHighlight(ctx, target.ID)
+	case targetStory:
+		return r.inspectStory(ctx, target.Username, target.StoryID)
+	case targetPost:
+		return r.inspectMedia(ctx, target.ID)
 	}
 
-	return r.inspectMedia(ctx, targetID)
+	return nil, fmt.Errorf("unsupported Instagram target type")
 }
 
 func (r *Resolver) inspectHighlight(ctx context.Context, highlightID string) (*resolver.PlaylistInfo, error) {
@@ -349,6 +395,181 @@ func (r *Resolver) inspectHighlight(ctx context.Context, highlightID string) (*r
 		Count: len(items),
 		Items: items,
 	}, nil
+}
+
+func (r *Resolver) inspectStory(ctx context.Context, username, storyID string) (*resolver.PlaylistInfo, error) {
+	reel, err := r.fetchUserReel(ctx, username, storyID)
+	if err != nil {
+		return nil, err
+	}
+
+	defaultUsername := reel.User.Username
+	if defaultUsername == "" {
+		defaultUsername = username
+	}
+	if defaultUsername == "" {
+		defaultUsername = "instagram_user"
+	}
+
+	var items []resolver.PlaylistItem
+	for i, it := range reel.Items {
+		user := it.User.Username
+		if user == "" {
+			user = defaultUsername
+		}
+
+		itemType := "video"
+		if it.MediaType == 1 {
+			itemType = "photo"
+		}
+
+		title := fmt.Sprintf("Story %d by @%s", i+1, user)
+
+		thumb := ""
+		if len(it.ImageVersions.Candidates) > 0 {
+			thumb = it.ImageVersions.Candidates[0].URL
+		}
+
+		pkStr := string(it.PK)
+		if pkStr == "" {
+			pkStr = it.Code
+		}
+		if pkStr == "" {
+			pkStr = it.ID
+		}
+
+		items = append(items, resolver.PlaylistItem{
+			Index:     i + 1,
+			ID:        pkStr,
+			Type:      itemType,
+			Title:     title,
+			Duration:  it.VideoDuration,
+			Timestamp: it.TakenAt,
+			Thumbnail: thumb,
+		})
+	}
+
+	return &resolver.PlaylistInfo{
+		Title: fmt.Sprintf("Stories by @%s", defaultUsername),
+		Count: len(items),
+		Items: items,
+	}, nil
+}
+
+func (r *Resolver) fetchUserReel(ctx context.Context, username, storyID string) (*igReel, error) {
+	client, err := r.createHTTPClient()
+	if err != nil {
+		return nil, fmt.Errorf("create client: %w", err)
+	}
+
+	userID := ""
+	// 1. If we have a storyID, try to query media info
+	if storyID != "" {
+		if item, err := r.fetchMediaInfo(ctx, storyID); err == nil && item != nil {
+			if string(item.User.PK) != "" {
+				userID = string(item.User.PK)
+			} else if item.User.Username != "" {
+				username = item.User.Username
+			}
+		}
+	}
+
+	// 2. If userID still not resolved, query profile info
+	if userID == "" && username != "" {
+		if uid, err := r.fetchUserIDByUsername(ctx, client, username); err == nil && uid != "" {
+			userID = uid
+		}
+	}
+
+	if userID == "" && storyID != "" {
+		userID = storyID
+	}
+
+	if userID == "" {
+		return nil, fmt.Errorf("could not determine user ID for @%s (please ensure cookies.txt has a valid sessionid)", username)
+	}
+
+	apiURL := fmt.Sprintf("%s/api/v1/feed/reels_media/?reel_ids=%s", r.base(), userID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("X-IG-App-ID", "936619743392459")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("instagram reels request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("Instagram authentication required: please provide a valid sessionid cookie in cookies.txt to access stories")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("instagram reels api returned status %d", resp.StatusCode)
+	}
+
+	var data igFeedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("decode instagram response: %w", err)
+	}
+
+	if reel, ok := data.Reels[userID]; ok {
+		return &reel, nil
+	}
+
+	for _, reel := range data.Reels {
+		return &reel, nil
+	}
+
+	return nil, fmt.Errorf("no active stories currently found for @%s", username)
+}
+
+func (r *Resolver) fetchUserIDByUsername(ctx context.Context, client *http.Client, username string) (string, error) {
+	apiURL := fmt.Sprintf("%s/api/v1/users/web_profile_info/?username=%s", r.base(), username)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("X-IG-App-ID", "936619743392459")
+	req.Header.Set("Referer", fmt.Sprintf("https://www.instagram.com/%s/", username))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("web_profile_info returned status %d", resp.StatusCode)
+	}
+
+	var data struct {
+		Data struct {
+			User struct {
+				ID string `json:"id"`
+				PK string `json:"pk"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", err
+	}
+
+	if data.Data.User.ID != "" {
+		return data.Data.User.ID, nil
+	}
+	if data.Data.User.PK != "" {
+		return data.Data.User.PK, nil
+	}
+
+	return "", fmt.Errorf("user ID not found in profile info")
 }
 
 func (r *Resolver) inspectMedia(ctx context.Context, mediaID string) (*resolver.PlaylistInfo, error) {
@@ -452,23 +673,118 @@ func (r *Resolver) inspectMedia(ctx context.Context, mediaID string) (*resolver.
 	}, nil
 }
 
-// Resolve extracts the direct download URL for Instagram items (highlight stories, posts, carousel slides, reels).
+// Resolve extracts the direct download URL for Instagram items (highlight stories, user stories, posts, carousel slides, reels).
 func (r *Resolver) Resolve(ctx context.Context, rawURL string) (*resolver.MediaInfo, error) {
 	parsedURL, err := security.ValidateURL(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	isHighlight, targetID, err := r.extractTarget(rawURL)
+	target, err := r.extractTarget(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	if isHighlight {
-		return r.resolveHighlight(ctx, parsedURL, targetID)
+	switch target.Type {
+	case targetHighlight:
+		return r.resolveHighlight(ctx, parsedURL, target.ID)
+	case targetStory:
+		return r.resolveStory(ctx, parsedURL, target.Username, target.StoryID)
+	case targetPost:
+		return r.resolveMedia(ctx, parsedURL, target.ID)
 	}
 
-	return r.resolveMedia(ctx, parsedURL, targetID)
+	return nil, fmt.Errorf("unsupported Instagram target type")
+}
+
+func selectItem(items []igItem, itemParam string) (*igItem, int) {
+	if len(items) == 0 {
+		return nil, 0
+	}
+	if itemParam != "" {
+		for i := range items {
+			it := &items[i]
+			if string(it.PK) == itemParam || it.Code == itemParam || it.ID == itemParam || strings.HasPrefix(it.ID, itemParam+"_") {
+				return it, i + 1
+			}
+		}
+		if idx, err := strconv.Atoi(itemParam); err == nil && idx >= 1 && idx <= len(items) {
+			return &items[idx-1], idx
+		}
+	}
+	return &items[0], 1
+}
+
+func (r *Resolver) resolveStory(ctx context.Context, parsedURL *url.URL, username, storyID string) (*resolver.MediaInfo, error) {
+	reel, err := r.fetchUserReel(ctx, username, storyID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(reel.Items) == 0 {
+		return nil, fmt.Errorf("no active stories found for @%s", username)
+	}
+
+	itemParam := ""
+	if parsedURL != nil {
+		q := parsedURL.Query()
+		if p := q.Get("item"); p != "" {
+			itemParam = p
+		} else if p := q.Get("story_id"); p != "" {
+			itemParam = p
+		} else if p := q.Get("id"); p != "" {
+			itemParam = p
+		} else if p := q.Get("index"); p != "" {
+			itemParam = p
+		}
+	}
+	if itemParam == "" && storyID != "" {
+		itemParam = storyID
+	}
+
+	selectedItem, _ := selectItem(reel.Items, itemParam)
+
+	user := selectedItem.User.Username
+	if user == "" {
+		user = username
+	}
+	if user == "" {
+		user = "instagram_user"
+	}
+
+	itemPK := string(selectedItem.PK)
+	if itemPK == "" {
+		itemPK = selectedItem.Code
+	}
+
+	var downloadURL string
+	var mimeType string
+	var filename string
+
+	if selectedItem.MediaType == 1 { // Photo
+		if len(selectedItem.ImageVersions.Candidates) == 0 {
+			return nil, fmt.Errorf("no image candidates found for photo story")
+		}
+		downloadURL = selectedItem.ImageVersions.Candidates[0].URL
+		mimeType = "image/jpeg"
+		filename = fmt.Sprintf("Story by %s [%s].jpg", user, itemPK)
+	} else { // Video
+		if len(selectedItem.VideoVersions) == 0 {
+			return nil, fmt.Errorf("no video versions found for video story")
+		}
+		downloadURL = selectedItem.VideoVersions[0].URL
+		mimeType = "video/mp4"
+		filename = fmt.Sprintf("Story by %s [%s].mp4", user, itemPK)
+	}
+
+	filename = security.SanitizeFilename(filename)
+
+	return &resolver.MediaInfo{
+		URL:       downloadURL,
+		MIMEType:  mimeType,
+		Filename:  filename,
+		SizeBytes: -1,
+	}, nil
 }
 
 func (r *Resolver) resolveHighlight(ctx context.Context, parsedURL *url.URL, highlightID string) (*resolver.MediaInfo, error) {
@@ -481,43 +797,21 @@ func (r *Resolver) resolveHighlight(ctx context.Context, parsedURL *url.URL, hig
 		return nil, fmt.Errorf("no items found in highlight")
 	}
 
-	targetIndex := -1
-	targetID := ""
+	itemParam := ""
 	if parsedURL != nil {
 		q := parsedURL.Query()
-		if itemParam := q.Get("item"); itemParam != "" {
-			if idx, err := strconv.Atoi(itemParam); err == nil {
-				targetIndex = idx
-			} else {
-				targetID = itemParam
-			}
-		} else if idxParam := q.Get("index"); idxParam != "" {
-			if idx, err := strconv.Atoi(idxParam); err == nil {
-				targetIndex = idx
-			}
-		} else if idParam := q.Get("story_id"); idParam != "" {
-			targetID = idParam
-		} else if idParam := q.Get("id"); idParam != "" {
-			targetID = idParam
+		if p := q.Get("item"); p != "" {
+			itemParam = p
+		} else if p := q.Get("story_id"); p != "" {
+			itemParam = p
+		} else if p := q.Get("id"); p != "" {
+			itemParam = p
+		} else if p := q.Get("index"); p != "" {
+			itemParam = p
 		}
 	}
 
-	var selectedItem *igItem
-	if targetIndex > 0 && targetIndex <= len(reel.Items) {
-		selectedItem = &reel.Items[targetIndex-1]
-	} else if targetID != "" {
-		for i := range reel.Items {
-			it := &reel.Items[i]
-			if string(it.PK) == targetID || it.Code == targetID || it.ID == targetID {
-				selectedItem = it
-				break
-			}
-		}
-	}
-
-	if selectedItem == nil {
-		selectedItem = &reel.Items[0]
-	}
+	selectedItem, _ := selectItem(reel.Items, itemParam)
 
 	username := selectedItem.User.Username
 	if username == "" {
@@ -568,28 +862,19 @@ func (r *Resolver) resolveMedia(ctx context.Context, parsedURL *url.URL, mediaID
 		return nil, err
 	}
 
-	targetIndex := -1
-	targetID := ""
+	itemParam := ""
 	if parsedURL != nil {
 		q := parsedURL.Query()
-		if idxVal := q.Get("img_index"); idxVal != "" {
-			if idx, err := strconv.Atoi(idxVal); err == nil {
-				targetIndex = idx
-			}
-		} else if itemVal := q.Get("item"); itemVal != "" {
-			if idx, err := strconv.Atoi(itemVal); err == nil {
-				targetIndex = idx
-			} else {
-				targetID = itemVal
-			}
-		} else if idxVal := q.Get("index"); idxVal != "" {
-			if idx, err := strconv.Atoi(idxVal); err == nil {
-				targetIndex = idx
-			}
-		} else if idVal := q.Get("id"); idVal != "" {
-			targetID = idVal
-		} else if idVal := q.Get("pk"); idVal != "" {
-			targetID = idVal
+		if p := q.Get("item"); p != "" {
+			itemParam = p
+		} else if p := q.Get("img_index"); p != "" {
+			itemParam = p
+		} else if p := q.Get("index"); p != "" {
+			itemParam = p
+		} else if p := q.Get("id"); p != "" {
+			itemParam = p
+		} else if p := q.Get("pk"); p != "" {
+			itemParam = p
 		}
 	}
 
@@ -607,27 +892,7 @@ func (r *Resolver) resolveMedia(ctx context.Context, parsedURL *url.URL, mediaID
 			return nil, fmt.Errorf("carousel post has no child media items")
 		}
 
-		var selectedChild *igItem
-		slideNumber := 1
-
-		if targetIndex > 0 && targetIndex <= len(item.CarouselMedia) {
-			selectedChild = &item.CarouselMedia[targetIndex-1]
-			slideNumber = targetIndex
-		} else if targetID != "" {
-			for i := range item.CarouselMedia {
-				c := &item.CarouselMedia[i]
-				if string(c.PK) == targetID || c.Code == targetID || c.ID == targetID {
-					selectedChild = c
-					slideNumber = i + 1
-					break
-				}
-			}
-		}
-
-		if selectedChild == nil {
-			selectedChild = &item.CarouselMedia[0]
-			slideNumber = 1
-		}
+		selectedChild, slideNumber := selectItem(item.CarouselMedia, itemParam)
 
 		childPK := string(selectedChild.PK)
 		if childPK == "" {

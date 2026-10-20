@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -34,9 +35,9 @@ func New() *Resolver {
 
 // CanHandle returns true if the URL has a known media extension.
 func (r *Resolver) CanHandle(rawURL string) bool {
-	// Fast path: check extension
-	u, err := security.ValidateURL(context.Background(), rawURL)
-	if err != nil {
+	// Fast path: check valid HTTP(S) URL and extension
+	u, err := url.ParseRequestURI(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return false
 	}
 

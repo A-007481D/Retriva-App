@@ -6,7 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/A-007481D/retriva/server/internal/security"
 )
+
+func init() {
+	security.DisableSSRFCheck = true
+}
 
 func TestShortcodeToMediaID(t *testing.T) {
 	tests := []struct {
@@ -58,19 +64,24 @@ func TestCanHandle(t *testing.T) {
 func TestExtractTarget(t *testing.T) {
 	r := New("")
 
-	isHL, id, err := r.extractTarget("https://www.instagram.com/stories/highlights/18122897002451585/")
-	if err != nil || !isHL || id != "18122897002451585" {
-		t.Fatalf("unexpected extractTarget for highlight: %v, %v, %v", isHL, id, err)
+	target, err := r.extractTarget("https://www.instagram.com/stories/highlights/18122897002451585/")
+	if err != nil || target.Type != targetHighlight || target.ID != "18122897002451585" {
+		t.Fatalf("unexpected extractTarget for highlight: %v, %v", target, err)
 	}
 
-	isHL, id, err = r.extractTarget("https://www.instagram.com/p/DaWHkQpid02/?img_index=2")
-	if err != nil || isHL || id != "3933364602658217270" {
-		t.Fatalf("unexpected extractTarget for post: %v, %v, %v", isHL, id, err)
+	target, err = r.extractTarget("https://www.instagram.com/p/DaWHkQpid02/?img_index=2")
+	if err != nil || target.Type != targetPost || target.ID != "3933364602658217270" {
+		t.Fatalf("unexpected extractTarget for post: %v, %v", target, err)
 	}
 
-	isHL, id, err = r.extractTarget("https://www.instagram.com/stories/someone/3982929260775922792/")
-	if err != nil || isHL || id != "3982929260775922792" {
-		t.Fatalf("unexpected extractTarget for story: %v, %v, %v", isHL, id, err)
+	target, err = r.extractTarget("https://www.instagram.com/stories/someone/3982929260775922792/")
+	if err != nil || target.Type != targetStory || target.Username != "someone" || target.StoryID != "3982929260775922792" {
+		t.Fatalf("unexpected extractTarget for story with ID: %v, %v", target, err)
+	}
+
+	target, err = r.extractTarget("https://www.instagram.com/stories/omnia7086/")
+	if err != nil || target.Type != targetStory || target.Username != "omnia7086" || target.StoryID != "" {
+		t.Fatalf("unexpected extractTarget for story without ID: %v, %v", target, err)
 	}
 }
 
@@ -181,5 +192,159 @@ func TestInspectAndResolveCarousel(t *testing.T) {
 	}
 	if media1.Filename != "Photo 1 by meldadel [3933364417489830512].jpg" {
 		t.Errorf("expected filename 'Photo 1 by meldadel [3933364417489830512].jpg', got %q", media1.Filename)
+	}
+}
+
+func TestInspectAndResolveStory(t *testing.T) {
+	mockReelsResponse := map[string]any{
+		"status": "ok",
+		"reels": map[string]any{
+			"3422436823": map[string]any{
+				"id":    "3422436823",
+				"title": "",
+				"user": map[string]any{
+					"username": "omnia7086",
+				},
+				"items": []map[string]any{
+					{
+						"pk":             "4012173398310500441",
+						"id":             "4012173398310500441",
+						"code":           "storyCode1",
+						"media_type":     1, // Photo
+						"taken_at":       1700000000,
+						"video_duration": 0.0,
+						"image_versions2": map[string]any{
+							"candidates": []map[string]any{
+								{
+									"url":    "https://cdn.example.com/story1.jpg",
+									"width":  1080,
+									"height": 1920,
+								},
+							},
+						},
+						"user": map[string]any{
+							"username": "omnia7086",
+						},
+					},
+					{
+						"pk":             "4012173398310500443",
+						"id":             "4012173398310500443",
+						"code":           "storyCode2",
+						"media_type":     2, // Video
+						"taken_at":       1700000010,
+						"video_duration": 15.0,
+						"video_versions": []map[string]any{
+							{
+								"url":    "https://cdn.example.com/story2.mp4",
+								"width":  1080,
+								"height": 1920,
+							},
+						},
+						"image_versions2": map[string]any{
+							"candidates": []map[string]any{
+								{
+									"url":    "https://cdn.example.com/story2_thumb.jpg",
+									"width":  1080,
+									"height": 1920,
+								},
+							},
+						},
+						"user": map[string]any{
+							"username": "omnia7086",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mockProfileResponse := map[string]any{
+		"data": map[string]any{
+			"user": map[string]any{
+				"id":        "3422436823",
+				"username":  "omnia7086",
+				"full_name": "Omnia",
+			},
+		},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if req.URL.Path == "/api/v1/users/web_profile_info/" {
+			json.NewEncoder(w).Encode(mockProfileResponse)
+			return
+		}
+		if req.URL.Path == "/api/v1/feed/reels_media/" {
+			json.NewEncoder(w).Encode(mockReelsResponse)
+			return
+		}
+		http.NotFound(w, req)
+	}))
+	defer srv.Close()
+
+	r := New("")
+	r.apiBaseURL = srv.URL
+
+	ctx := context.Background()
+
+	// 1. Test Inspect without story ID
+	info, err := r.Inspect(ctx, "https://www.instagram.com/stories/omnia7086/")
+	if err != nil {
+		t.Fatalf("Inspect story failed: %v", err)
+	}
+
+	if info.Count != 2 {
+		t.Errorf("expected count 2, got %d", info.Count)
+	}
+	if info.Title != "Stories by @omnia7086" {
+		t.Errorf("expected title 'Stories by @omnia7086', got %q", info.Title)
+	}
+	if len(info.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(info.Items))
+	}
+	if info.Items[0].Type != "photo" || info.Items[1].Type != "video" {
+		t.Errorf("expected photo and video, got %s and %s", info.Items[0].Type, info.Items[1].Type)
+	}
+
+	// 2. Test Inspect with story ID
+	info2, err := r.Inspect(ctx, "https://www.instagram.com/stories/omnia7086/4012173398310500443/")
+	if err != nil {
+		t.Fatalf("Inspect story with ID failed: %v", err)
+	}
+	if info2.Count != 2 {
+		t.Errorf("expected count 2, got %d", info2.Count)
+	}
+
+	// 3. Test Resolve specific story ID
+	media, err := r.Resolve(ctx, "https://www.instagram.com/stories/omnia7086/4012173398310500443/")
+	if err != nil {
+		t.Fatalf("Resolve story with ID failed: %v", err)
+	}
+	if media.URL != "https://cdn.example.com/story2.mp4" {
+		t.Errorf("expected story2 video URL, got %q", media.URL)
+	}
+	if media.MIMEType != "video/mp4" {
+		t.Errorf("expected video/mp4, got %q", media.MIMEType)
+	}
+
+	// 4. Test Resolve story item 1
+	media1, err := r.Resolve(ctx, "https://www.instagram.com/stories/omnia7086/?item=1")
+	if err != nil {
+		t.Fatalf("Resolve story with item=1 failed: %v", err)
+	}
+	if media1.URL != "https://cdn.example.com/story1.jpg" {
+		t.Errorf("expected story1 photo URL, got %q", media1.URL)
+	}
+	if media1.MIMEType != "image/jpeg" {
+		t.Errorf("expected image/jpeg, got %q", media1.MIMEType)
+	}
+
+	// 5. Test Resolve story with item=<storyID> (large numeric ID as passed by multi-item selection)
+	mediaByStoryID, err := r.Resolve(ctx, "https://www.instagram.com/stories/omnia7086/?item=4012173398310500443")
+	if err != nil {
+		t.Fatalf("Resolve story with item=4012173398310500443 failed: %v", err)
+	}
+	if mediaByStoryID.URL != "https://cdn.example.com/story2.mp4" {
+		t.Errorf("expected story2 video URL, got %q", mediaByStoryID.URL)
 	}
 }
