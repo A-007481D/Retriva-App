@@ -33,6 +33,9 @@ func (r *Registry) Resolve(ctx context.Context, rawURL string) (*MediaInfo, erro
 				return info, nil
 			}
 			lastErr = err
+			if strings.Contains(err.Error(), "no active stories") {
+				return nil, err
+			}
 		}
 	}
 	if lastErr != nil {

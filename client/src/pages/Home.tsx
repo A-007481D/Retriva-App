@@ -265,9 +265,9 @@ export const Home: React.FC = () => {
             }
           }
         } catch (inspectErr: any) {
-          console.warn("Inspection skipped or single item, falling back to direct download:", inspectErr);
-          if (inspectErr.message && (inspectErr.message.includes("login") || inspectErr.message.includes("cookie") || inspectErr.message.includes("authentication"))) {
-            setStatus({ type: "error", message: inspectErr.message });
+          console.warn("Inspection skipped or failed:", inspectErr);
+          if (isStory || isHighlight || (inspectErr.message && (inspectErr.message.includes("login") || inspectErr.message.includes("cookie") || inspectErr.message.includes("authentication") || inspectErr.message.includes("no active stories")))) {
+            setStatus({ type: "error", message: inspectErr.message || "Failed to inspect stories" });
             setIsLoading(false);
             return;
           }
