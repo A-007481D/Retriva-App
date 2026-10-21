@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/cookiejar"
@@ -24,6 +25,7 @@ var (
 	highlightRegex = regexp.MustCompile(`/(?:stories/)?highlights/(\d+)`)
 	postRegex      = regexp.MustCompile(`/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)`)
 	userStoryRegex = regexp.MustCompile(`/stories/([A-Za-z0-9_.]+)(?:/(\d+))?/?`)
+	profileIDRegex = regexp.MustCompile(`"(?:profile_id|page_id)":\s*"(?:profilePage_)?(\d+)"`)
 )
 
 type targetType int
@@ -495,7 +497,7 @@ func (r *Resolver) fetchUserReel(ctx context.Context, username, storyID string) 
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", "Instagram 278.0.0.19.115 Android (33/13; 420dpi; 1080x2400; Google/google; Pixel 7; cheetah; cheetah; en_US; 467268872)")
 	req.Header.Set("X-IG-App-ID", "936619743392459")
 
 	resp, err := client.Do(req)
@@ -525,10 +527,30 @@ func (r *Resolver) fetchUserReel(ctx context.Context, username, storyID string) 
 		return &reel, nil
 	}
 
-	return nil, fmt.Errorf("no active stories currently found for @%s", username)
+	return nil, fmt.Errorf("@%s has no active stories right now (stories expire after 24 hours)", username)
 }
 
 func (r *Resolver) fetchUserIDByUsername(ctx context.Context, client *http.Client, username string) (string, error) {
+	// 1. Try public profile HTML scraping using Facebook crawler User-Agent
+	// Instagram always server-renders full meta tags and profile IDs for crawlers without requiring login.
+	profileURL := fmt.Sprintf("https://www.instagram.com/%s/", username)
+	reqHTML, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, nil)
+	if err == nil {
+		reqHTML.Header.Set("User-Agent", "facebookexternalhit/1.1")
+		reqHTML.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+		unauthClient := &http.Client{Timeout: 10 * time.Second}
+		if respHTML, err := unauthClient.Do(reqHTML); err == nil {
+			defer respHTML.Body.Close()
+			if respHTML.StatusCode == http.StatusOK {
+				bodyBytes, _ := io.ReadAll(io.LimitReader(respHTML.Body, 2*1024*1024))
+				if m := profileIDRegex.FindSubmatch(bodyBytes); len(m) >= 2 {
+					return string(m[1]), nil
+				}
+			}
+		}
+	}
+
+	// 2. Fallback to web_profile_info endpoint with authenticated client
 	apiURL := fmt.Sprintf("%s/api/v1/users/web_profile_info/?username=%s", r.base(), username)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {

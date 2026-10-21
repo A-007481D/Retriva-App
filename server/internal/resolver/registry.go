@@ -3,6 +3,7 @@ package resolver
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // ErrUnsupportedSource is returned when no resolver can handle the given URL.
@@ -52,6 +53,9 @@ func (r *Registry) Inspect(ctx context.Context, rawURL string) (*PlaylistInfo, e
 					return info, nil
 				}
 				lastErr = err
+				if strings.Contains(err.Error(), "no active stories") {
+					return nil, err
+				}
 			}
 		}
 	}
