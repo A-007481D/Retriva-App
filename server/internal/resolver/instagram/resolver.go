@@ -421,6 +421,11 @@ func (r *Resolver) fetchGraphQLReelsMedia(ctx context.Context, reelIDs, highligh
 		reel.Items = append(reel.Items, item)
 	}
 
+	// Sort stories in chronological order (first story added appears first)
+	sort.SliceStable(reel.Items, func(i, j int) bool {
+		return reel.Items[i].TakenAt < reel.Items[j].TakenAt
+	})
+
 	return reel, nil
 }
 
@@ -557,6 +562,11 @@ func (r *Resolver) inspectHighlight(ctx context.Context, highlightID string) (*r
 		return nil, err
 	}
 
+	// Ensure chronological order (first story added appears first)
+	sort.SliceStable(reel.Items, func(i, j int) bool {
+		return reel.Items[i].TakenAt < reel.Items[j].TakenAt
+	})
+
 	defaultUsername := reel.User.Username
 	if defaultUsername == "" {
 		defaultUsername = reel.User.FullName
@@ -622,6 +632,11 @@ func (r *Resolver) inspectStory(ctx context.Context, username, storyID string) (
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure chronological order (first story added appears first)
+	sort.SliceStable(reel.Items, func(i, j int) bool {
+		return reel.Items[i].TakenAt < reel.Items[j].TakenAt
+	})
 
 	defaultUsername := reel.User.Username
 	if defaultUsername == "" {
@@ -1051,6 +1066,11 @@ func (r *Resolver) resolveHighlight(ctx context.Context, parsedURL *url.URL, hig
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure chronological order matches inspect
+	sort.SliceStable(reel.Items, func(i, j int) bool {
+		return reel.Items[i].TakenAt < reel.Items[j].TakenAt
+	})
 
 	if len(reel.Items) == 0 {
 		return nil, fmt.Errorf("no items found in highlight")
