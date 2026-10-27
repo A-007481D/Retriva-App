@@ -22,6 +22,7 @@ import {
   CheckCheck,
   ChevronLeft,
   ChevronRight,
+  Calendar,
 } from "lucide-react";
 import { getVault, getMediaFileUrl, deleteMedia, batchDeleteMedia, type Media } from "../lib/api";
 import { cn } from "../lib/utils";
@@ -50,9 +51,84 @@ function formatDate(dateStr: string): string {
   }
 }
 
+function formatTimeOnly(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+function getDateKey(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  } catch {
+    return (dateStr || "").substring(0, 10);
+  }
+}
+
+function formatDateHeader(dateKey: string): {
+  title: string;
+  subtitle: string;
+  isToday: boolean;
+  isYesterday: boolean;
+} {
+  try {
+    const parts = dateKey.split("-");
+    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    const now = new Date();
+
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const diffDays = Math.round((today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24));
+
+    const formattedLong = d.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    if (diffDays === 0) {
+      return { title: "Today", subtitle: formattedLong, isToday: true, isYesterday: false };
+    } else if (diffDays === 1) {
+      return { title: "Yesterday", subtitle: formattedLong, isToday: false, isYesterday: true };
+    } else if (diffDays > 1 && diffDays < 7) {
+      const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+      return { title: weekday, subtitle: formattedLong, isToday: false, isYesterday: false };
+    } else {
+      const title = d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      const subtitle = d.toLocaleDateString("en-US", { weekday: "long" });
+      return { title, subtitle, isToday: false, isYesterday: false };
+    }
+  } catch {
+    return { title: dateKey, subtitle: "", isToday: false, isYesterday: false };
+  }
+}
+
 type DeleteTarget =
   | { type: "single"; item: Media }
   | { type: "batch"; ids: string[]; count: number; totalBytes: number };
+
+interface DateGroup {
+  dateKey: string;
+  title: string;
+  subtitle: string;
+  isToday: boolean;
+  isYesterday: boolean;
+  items: Media[];
+  totalBytes: number;
+  videoCount: number;
+  photoCount: number;
+}
 
 export const Vault: React.FC = () => {
   const [items, setItems] = useState<Media[]>([]);
@@ -60,6 +136,7 @@ export const Vault: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "video" | "photo">("all");
+  const [dateFilter, setDateFilter] = useState<string>("all");
   const [selectedMedia, setSelectedMedia] = useState<Media | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -104,6 +181,25 @@ export const Vault: React.FC = () => {
     return items.filter((it) => it.mimeType.startsWith("image")).length;
   }, [items]);
 
+  // Distinct dates present in the vault for the dropdown selector
+  const availableDates = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of items) {
+      const k = getDateKey(it.createdAt);
+      map.set(k, (map.get(k) || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([dateKey, count]) => {
+        const header = formatDateHeader(dateKey);
+        return {
+          dateKey,
+          label: `${header.title} (${count})`,
+          count,
+        };
+      });
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     return items.filter((it) => {
       const isVideo = it.mimeType.startsWith("video");
@@ -111,6 +207,31 @@ export const Vault: React.FC = () => {
 
       if (filter === "video" && !isVideo) return false;
       if (filter === "photo" && !isPhoto) return false;
+
+      // Date Filter
+      if (dateFilter !== "all") {
+        const itemDateKey = getDateKey(it.createdAt);
+        if (dateFilter === "today") {
+          const todayKey = getDateKey(new Date().toISOString());
+          if (itemDateKey !== todayKey) return false;
+        } else if (dateFilter === "yesterday") {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yestKey = getDateKey(yesterday.toISOString());
+          if (itemDateKey !== yestKey) return false;
+        } else if (dateFilter === "week") {
+          const itemTime = new Date(it.createdAt).getTime();
+          const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          if (itemTime < weekAgo) return false;
+        } else if (dateFilter === "month") {
+          const itemTime = new Date(it.createdAt).getTime();
+          const monthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+          if (itemTime < monthAgo) return false;
+        } else {
+          // Specific dateKey (e.g. "2026-10-27")
+          if (itemDateKey !== dateFilter) return false;
+        }
+      }
 
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -121,7 +242,42 @@ export const Vault: React.FC = () => {
       }
       return true;
     });
-  }, [items, filter, search]);
+  }, [items, filter, dateFilter, search]);
+
+  // Group filtered items by date phase
+  const dateGroups = useMemo<DateGroup[]>(() => {
+    const groupsMap = new Map<string, Media[]>();
+
+    for (const item of filteredItems) {
+      const key = getDateKey(item.createdAt);
+      let arr = groupsMap.get(key);
+      if (!arr) {
+        arr = [];
+        groupsMap.set(key, arr);
+      }
+      arr.push(item);
+    }
+
+    // Sort descending: newest phase first
+    const sortedKeys = Array.from(groupsMap.keys()).sort((a, b) => b.localeCompare(a));
+
+    return sortedKeys.map((key) => {
+      const groupItems = groupsMap.get(key)!;
+      const header = formatDateHeader(key);
+      const groupTotalBytes = groupItems.reduce((acc, it) => acc + (it.sizeBytes || 0), 0);
+      const groupVideos = groupItems.filter((it) => it.mimeType.startsWith("video")).length;
+      const groupPhotos = groupItems.filter((it) => it.mimeType.startsWith("image")).length;
+
+      return {
+        dateKey: key,
+        ...header,
+        items: groupItems,
+        totalBytes: groupTotalBytes,
+        videoCount: groupVideos,
+        photoCount: groupPhotos,
+      };
+    });
+  }, [filteredItems]);
 
   const selectedSize = useMemo(() => {
     let sum = 0;
@@ -157,6 +313,25 @@ export const Vault: React.FC = () => {
       return next;
     });
     if (!selectionMode) {
+      setSelectionMode(true);
+    }
+  };
+
+  const toggleSelectDateGroup = (groupItems: Media[]) => {
+    const groupIds = groupItems.map((it) => it.id);
+    const allSelected = groupIds.length > 0 && groupIds.every((id) => selectedIds.has(id));
+
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        groupIds.forEach((id) => next.delete(id));
+      } else {
+        groupIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+
+    if (!allSelected && !selectionMode) {
       setSelectionMode(true);
     }
   };
@@ -256,6 +431,7 @@ export const Vault: React.FC = () => {
     }
   };
 
+  // Lightbox keyboard navigation
   const currentIndex = useMemo(() => {
     if (!selectedMedia) return -1;
     return filteredItems.findIndex((it) => it.id === selectedMedia.id);
@@ -312,6 +488,149 @@ export const Vault: React.FC = () => {
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every((it) => selectedIds.has(it.id));
 
+  // Render individual media card
+  const renderCard = (item: Media) => {
+    const isVideo = item.mimeType.startsWith("video");
+    const fileUrl = getMediaFileUrl(item.id);
+    const isSelected = selectedIds.has(item.id);
+
+    return (
+      <div
+        key={item.id}
+        onClick={(e) => {
+          if (selectionMode) {
+            toggleSelect(item.id, e);
+          } else {
+            setSelectedMedia(item);
+          }
+        }}
+        className={cn(
+          "group relative aspect-[9/16] rounded-2xl overflow-hidden bg-[#121318] border transition-all duration-200 cursor-pointer flex flex-col justify-between hover:shadow-xl hover:shadow-black/60 select-none",
+          isSelected
+            ? "ring-2 ring-emerald-400 border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.25)] scale-[0.98]"
+            : "border-white/[0.08] hover:border-emerald-500/40 hover:scale-[1.01]"
+        )}
+      >
+        {/* Media Preview Media */}
+        {isVideo ? (
+          <div className="absolute inset-0 bg-black flex items-center justify-center">
+            <video
+              src={fileUrl}
+              preload="metadata"
+              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+            />
+            {!selectionMode && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black transition-all">
+                  <Play className="w-4 h-4 fill-current ml-0.5" />
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <img
+            src={fileUrl}
+            alt={item.filename}
+            referrerPolicy="no-referrer"
+            className="absolute inset-0 w-full h-full object-cover opacity-85 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300"
+          />
+        )}
+
+        {/* Dark Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/60 pointer-events-none" />
+
+        {/* Top Bar: Selection Checkbox & Type Badge */}
+        <div className="relative z-10 p-2.5 flex items-center justify-between">
+          {/* Select Checkbox */}
+          <button
+            type="button"
+            onClick={(e) => toggleSelect(item.id, e)}
+            className={cn(
+              "w-6 h-6 rounded-lg flex items-center justify-center transition-all backdrop-blur-md border",
+              isSelected
+                ? "bg-emerald-500 text-black border-emerald-400 shadow-sm"
+                : selectionMode
+                ? "bg-black/60 border-white/30 text-white/40 hover:text-white hover:border-white/60"
+                : "opacity-0 group-hover:opacity-100 bg-black/60 border-white/20 text-white/40 hover:text-white"
+            )}
+            title={isSelected ? "Deselect item" : "Select item"}
+          >
+            {isSelected ? (
+              <Check className="w-4 h-4 stroke-[3]" />
+            ) : (
+              <Square className="w-3.5 h-3.5 opacity-60" />
+            )}
+          </button>
+
+          <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono uppercase tracking-wider backdrop-blur-md border flex items-center gap-1",
+                isVideo
+                  ? "bg-teal-500/20 text-teal-300 border-teal-500/30"
+                  : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+              )}
+            >
+              {isVideo ? <Video className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}
+              <span>{isVideo ? "MP4" : "JPG"}</span>
+            </span>
+
+            <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-zinc-300 font-semibold">
+              {formatBytes(item.sizeBytes)}
+            </span>
+          </div>
+        </div>
+
+        {/* Bottom Details */}
+        <div className="relative z-10 p-3 bg-gradient-to-t from-black/95 to-transparent">
+          <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-300 transition-colors">
+            {item.filename}
+          </p>
+
+          <div className="flex items-center justify-between text-[10px] text-zinc-400 mt-1 font-mono">
+            <span className="flex items-center gap-1 truncate text-zinc-400">
+              <Clock className="w-3 h-3 text-zinc-500 flex-shrink-0" />
+              <span>{formatTimeOnly(item.createdAt)}</span>
+            </span>
+
+            {/* Quick Action Buttons: Copy, Download, Delete */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={(e) => handleCopyLink(item.id, e)}
+                className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all"
+                title="Copy direct file link"
+              >
+                {copiedId === item.id ? (
+                  <Check className="w-3 h-3 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3 h-3" />
+                )}
+              </button>
+
+              <a
+                href={fileUrl}
+                download={item.filename}
+                onClick={(e) => e.stopPropagation()}
+                className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all"
+                title="Download file directly"
+              >
+                <Download className="w-3 h-3" />
+              </a>
+
+              <button
+                onClick={(e) => openSingleDelete(item, e)}
+                className="w-6 h-6 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 hover:text-rose-100 flex items-center justify-center transition-all"
+                title="Delete file permanently"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-36">
       {/* Page Title & Stats */}
@@ -327,7 +646,7 @@ export const Vault: React.FC = () => {
             Media Vault
           </h1>
           <p className="text-sm text-zinc-400 mt-1 max-w-xl">
-            All captured media is permanently preserved locally on your machine with zero expiration.
+            All captured media is permanently preserved locally on your machine with zero expiration, grouped cleanly by download phase.
           </p>
         </div>
 
@@ -350,6 +669,16 @@ export const Vault: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/[0.08]">
+            <Calendar className="w-4 h-4 text-emerald-400" />
+            <div className="flex flex-col">
+              <span className="text-[10px] text-zinc-500 font-mono uppercase">Active Phases</span>
+              <span className="text-xs font-bold text-emerald-300 font-mono">
+                {dateGroups.length} {dateGroups.length === 1 ? "Day" : "Days"}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/[0.08]">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <div className="flex flex-col">
               <span className="text-[10px] text-zinc-500 font-mono uppercase">Retention</span>
@@ -360,9 +689,9 @@ export const Vault: React.FC = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 my-6">
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 my-6">
         {/* Search */}
-        <div className="relative w-full sm:w-80">
+        <div className="relative w-full lg:w-72">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -373,8 +702,9 @@ export const Vault: React.FC = () => {
           />
         </div>
 
-        {/* Filter Pills & Actions */}
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
+        {/* Filter Toolbar: Media Type + Date Filter + Multi-Select */}
+        <div className="flex flex-wrap items-center gap-2.5 justify-between lg:justify-end">
+          {/* Media Type Filter Pills */}
           <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/[0.08] text-xs">
             <button
               onClick={() => setFilter("all")}
@@ -424,6 +754,31 @@ export const Vault: React.FC = () => {
             </button>
           </div>
 
+          {/* Date Phase Filter Dropdown */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/[0.08] text-xs">
+            <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="bg-transparent text-white font-semibold outline-none cursor-pointer pr-1"
+            >
+              <option value="all" className="bg-[#161720] text-white">All Dates</option>
+              <option value="today" className="bg-[#161720] text-white">Today</option>
+              <option value="yesterday" className="bg-[#161720] text-white">Yesterday</option>
+              <option value="week" className="bg-[#161720] text-white">Past 7 Days</option>
+              <option value="month" className="bg-[#161720] text-white">Past 30 Days</option>
+              {availableDates.length > 0 && (
+                <optgroup label="Specific Days" className="bg-[#161720] text-zinc-400 font-bold">
+                  {availableDates.map((d) => (
+                    <option key={d.dateKey} value={d.dateKey} className="bg-[#161720] text-white">
+                      {d.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+
           {/* Toggle Multi-Select Mode */}
           <button
             onClick={() => {
@@ -467,7 +822,7 @@ export const Vault: React.FC = () => {
         </div>
       </div>
 
-      {/* Media Grid */}
+      {/* Main Content Area: Grouped & Separated by Date */}
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-pulse">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
@@ -489,150 +844,86 @@ export const Vault: React.FC = () => {
           <FolderArchive className="w-12 h-12 text-zinc-600 mb-3" />
           <h3 className="text-lg font-bold text-white">No items found</h3>
           <p className="text-xs text-zinc-500 max-w-sm mt-1">
-            {search
-              ? "No files match your search query."
+            {search || dateFilter !== "all"
+              ? "No files match your search query or date filter."
               : "Capture stories or videos using the Extractor and they will appear here."}
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {filteredItems.map((item) => {
-            const isVideo = item.mimeType.startsWith("video");
-            const fileUrl = getMediaFileUrl(item.id);
-            const isSelected = selectedIds.has(item.id);
+        <div className="space-y-12">
+          {dateGroups.map((group) => {
+            const groupAllSelected =
+              group.items.length > 0 && group.items.every((it) => selectedIds.has(it.id));
 
             return (
-              <div
-                key={item.id}
-                onClick={(e) => {
-                  if (selectionMode) {
-                    toggleSelect(item.id, e);
-                  } else {
-                    setSelectedMedia(item);
-                  }
-                }}
-                className={cn(
-                  "group relative aspect-[9/16] rounded-2xl overflow-hidden bg-[#121318] border transition-all duration-200 cursor-pointer flex flex-col justify-between hover:shadow-xl hover:shadow-black/60 select-none",
-                  isSelected
-                    ? "ring-2 ring-emerald-400 border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.25)] scale-[0.98]"
-                    : "border-white/[0.08] hover:border-emerald-500/40 hover:scale-[1.01]"
-                )}
-              >
-                {/* Media Preview Media */}
-                {isVideo ? (
-                  <div className="absolute inset-0 bg-black flex items-center justify-center">
-                    <video
-                      src={fileUrl}
-                      preload="metadata"
-                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                    />
-                    {!selectionMode && (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black transition-all">
-                          <Play className="w-4 h-4 fill-current ml-0.5" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <img
-                    src={fileUrl}
-                    alt={item.filename}
-                    referrerPolicy="no-referrer"
-                    className="absolute inset-0 w-full h-full object-cover opacity-85 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300"
-                  />
-                )}
-
-                {/* Dark Gradient Overlay */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/60 pointer-events-none" />
-
-                {/* Top Bar: Selection Checkbox & Type Badge */}
-                <div className="relative z-10 p-2.5 flex items-center justify-between">
-                  {/* Select Checkbox */}
-                  <button
-                    type="button"
-                    onClick={(e) => toggleSelect(item.id, e)}
-                    className={cn(
-                      "w-6 h-6 rounded-lg flex items-center justify-center transition-all backdrop-blur-md border",
-                      isSelected
-                        ? "bg-emerald-500 text-black border-emerald-400 shadow-sm"
-                        : selectionMode
-                        ? "bg-black/60 border-white/30 text-white/40 hover:text-white hover:border-white/60"
-                        : "opacity-0 group-hover:opacity-100 bg-black/60 border-white/20 text-white/40 hover:text-white"
-                    )}
-                    title={isSelected ? "Deselect item" : "Select item"}
-                  >
-                    {isSelected ? (
-                      <Check className="w-4 h-4 stroke-[3]" />
-                    ) : (
-                      <Square className="w-3.5 h-3.5 opacity-60" />
-                    )}
-                  </button>
-
-                  <div className="flex items-center gap-1.5">
-                    <span
+              <div key={group.dateKey} className="relative">
+                {/* Date Phase Section Header */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-5 border-b border-white/[0.08]">
+                  <div className="flex items-center gap-3">
+                    <div
                       className={cn(
-                        "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono uppercase tracking-wider backdrop-blur-md border flex items-center gap-1",
-                        isVideo
-                          ? "bg-teal-500/20 text-teal-300 border-teal-500/30"
-                          : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                        "w-9 h-9 rounded-xl flex items-center justify-center border font-mono text-xs font-bold transition-colors",
+                        group.isToday
+                          ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+                          : "bg-white/[0.04] border-white/[0.08] text-zinc-300"
                       )}
                     >
-                      {isVideo ? <Video className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}
-                      <span>{isVideo ? "MP4" : "JPG"}</span>
+                      <Calendar className="w-4 h-4" />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                          {group.title}
+                        </h2>
+                        {group.isToday && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold uppercase tracking-wider">
+                            Today
+                          </span>
+                        )}
+                        {group.isYesterday && (
+                          <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-mono font-bold uppercase tracking-wider">
+                            Yesterday
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-zinc-400 font-mono">
+                        {group.subtitle}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Phase Stats & Select Day Button */}
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.08] text-xs font-mono font-semibold text-zinc-300">
+                      <span className="text-white font-bold">{group.items.length}</span>{" "}
+                      {group.items.length === 1 ? "download" : "downloads"}
                     </span>
 
-                    <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-zinc-300 font-semibold">
-                      {formatBytes(item.sizeBytes)}
+                    <span className="px-2.5 py-1 rounded-lg bg-white/[0.04] border border-white/[0.08] text-xs font-mono font-semibold text-zinc-400">
+                      {formatBytes(group.totalBytes)}
                     </span>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleSelectDateGroup(group.items)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg border text-xs font-semibold transition-all flex items-center gap-1.5",
+                        groupAllSelected
+                          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold"
+                          : "bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.08] text-zinc-400 hover:text-white"
+                      )}
+                      title="Select or deselect all downloads from this day"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{groupAllSelected ? "Deselect Day" : "Select Day"}</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Bottom Details */}
-                <div className="relative z-10 p-3 bg-gradient-to-t from-black/95 to-transparent">
-                  <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-300 transition-colors">
-                    {item.filename}
-                  </p>
-
-                  <div className="flex items-center justify-between text-[10px] text-zinc-400 mt-1 font-mono">
-                    <span className="flex items-center gap-1 truncate">
-                      <Clock className="w-3 h-3 text-zinc-500 flex-shrink-0" />
-                      <span>{formatDate(item.createdAt).split(",")[0]}</span>
-                    </span>
-
-                    {/* Quick Action Buttons: Copy, Download, Delete */}
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => handleCopyLink(item.id, e)}
-                        className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all"
-                        title="Copy direct file link"
-                      >
-                        {copiedId === item.id ? (
-                          <Check className="w-3 h-3 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                      </button>
-
-                      <a
-                        href={fileUrl}
-                        download={item.filename}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all"
-                        title="Download file directly"
-                      >
-                        <Download className="w-3 h-3" />
-                      </a>
-
-                      <button
-                        onClick={(e) => openSingleDelete(item, e)}
-                        className="w-6 h-6 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 hover:text-rose-100 flex items-center justify-center transition-all"
-                        title="Delete file permanently"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
+                {/* Grid for this specific date */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {group.items.map((item) => renderCard(item))}
                 </div>
               </div>
             );
