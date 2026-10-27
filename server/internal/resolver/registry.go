@@ -33,7 +33,7 @@ func (r *Registry) Resolve(ctx context.Context, rawURL string) (*MediaInfo, erro
 				return info, nil
 			}
 			lastErr = err
-			if strings.Contains(err.Error(), "no active stories") {
+			if strings.Contains(rawURL, "instagram.com") || strings.Contains(err.Error(), "no active stories") {
 				return nil, err
 			}
 		}
@@ -56,7 +56,7 @@ func (r *Registry) Inspect(ctx context.Context, rawURL string) (*PlaylistInfo, e
 					return info, nil
 				}
 				lastErr = err
-				if strings.Contains(err.Error(), "no active stories") {
+				if strings.Contains(rawURL, "instagram.com") || strings.Contains(err.Error(), "no active stories") {
 					return nil, err
 				}
 			}

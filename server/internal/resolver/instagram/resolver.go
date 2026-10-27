@@ -245,7 +245,7 @@ func (r *Resolver) fetchReel(ctx context.Context, highlightID string) (*igReel, 
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", "Instagram 278.0.0.19.115 Android (33/13; 420dpi; 1080x2400; Google/google; Pixel 7; cheetah; cheetah; en_US; 467268872)")
 	req.Header.Set("X-IG-App-ID", "936619743392459")
 
 	resp, err := client.Do(req)
@@ -266,6 +266,9 @@ func (r *Resolver) fetchReel(ctx context.Context, highlightID string) (*igReel, 
 	reelKey := "highlight:" + highlightID
 	reel, ok := data.Reels[reelKey]
 	if !ok {
+		if len(data.Reels) == 0 {
+			return nil, fmt.Errorf("Instagram returned empty highlight reel for %s (Meta is rate-limiting automated requests or the session is restricted)", highlightID)
+		}
 		return nil, fmt.Errorf("highlight %s not found in response", highlightID)
 	}
 
@@ -284,7 +287,7 @@ func (r *Resolver) fetchMediaInfo(ctx context.Context, mediaID string) (*igItem,
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", "Instagram 278.0.0.19.115 Android (33/13; 420dpi; 1080x2400; Google/google; Pixel 7; cheetah; cheetah; en_US; 467268872)")
 	req.Header.Set("X-IG-App-ID", "936619743392459")
 
 	resp, err := client.Do(req)
@@ -525,6 +528,10 @@ func (r *Resolver) fetchUserReel(ctx context.Context, username, storyID string) 
 
 	for _, reel := range data.Reels {
 		return &reel, nil
+	}
+
+	if len(data.Reels) == 0 {
+		return nil, fmt.Errorf("Instagram returned empty story reel for @%s (Meta is rate-limiting automated requests or stories have expired)", username)
 	}
 
 	return nil, fmt.Errorf("@%s has no active stories right now (stories expire after 24 hours)", username)

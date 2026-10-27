@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"testing"
 
 	"github.com/A-007481D/retriva/server/internal/security"
@@ -58,6 +60,34 @@ func TestCanHandle(t *testing.T) {
 		if got := r.CanHandle(tc.url); got != tc.expected {
 			t.Errorf("CanHandle(%q) = %v; want %v", tc.url, got, tc.expected)
 		}
+	}
+}
+
+func TestCreateHTTPClientCookies(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_cookies_*.txt")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	cookieContent := `# Netscape HTTP Cookie File
+.instagram.com	TRUE	/	TRUE	1808093035	sessionid	testsession123
+.instagram.com	TRUE	/	TRUE	1808093035	ds_user_id	123456789
+`
+	if _, err := tempFile.Write([]byte(cookieContent)); err != nil {
+		t.Fatalf("write cookie: %v", err)
+	}
+	tempFile.Close()
+
+	r := New(tempFile.Name())
+	client, err := r.createHTTPClient()
+	if err != nil {
+		t.Fatalf("createHTTPClient error: %v", err)
+	}
+	u, _ := url.Parse("https://i.instagram.com/api/v1/feed/reels_media/")
+	cookies := client.Jar.Cookies(u)
+	if len(cookies) != 2 {
+		t.Errorf("expected 2 cookies, got %d", len(cookies))
 	}
 }
 
