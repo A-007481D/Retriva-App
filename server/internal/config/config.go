@@ -174,17 +174,26 @@ func Load() (*Config, error) {
 	}
 
 	if newestFile != "" {
-		if abs, err := filepath.Abs(newestFile); err == nil {
-			defaultCookies = abs
-		} else {
-			defaultCookies = newestFile
-		}
 		// If the newest cookies file was found in Downloads, automatically mirror it into data/cookies.txt
-		if strings.Contains(defaultCookies, "Downloads") {
-			if content, err := os.ReadFile(defaultCookies); err == nil && len(content) > 0 {
+		if strings.Contains(newestFile, "Downloads") {
+			if content, err := os.ReadFile(newestFile); err == nil && len(content) > 0 {
 				_ = os.MkdirAll("data", 0755)
 				_ = os.WriteFile("data/cookies.txt", content, 0644)
 			}
+		}
+		// Prefer data/cookies.txt as the canonical persistent location
+		if abs, err := filepath.Abs("data/cookies.txt"); err == nil {
+			if fi, err := os.Stat(abs); err == nil && !fi.IsDir() && fi.Size() > 0 {
+				defaultCookies = abs
+			} else if absNewest, err := filepath.Abs(newestFile); err == nil {
+				defaultCookies = absNewest
+			} else {
+				defaultCookies = newestFile
+			}
+		} else if absNewest, err := filepath.Abs(newestFile); err == nil {
+			defaultCookies = absNewest
+		} else {
+			defaultCookies = newestFile
 		}
 	}
 	cfg.YtDlpCookies = envStr("RETRIVA_YTDLP_COOKIES", defaultCookies)
