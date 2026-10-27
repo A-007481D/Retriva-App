@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -118,6 +119,41 @@ func (h *Handler) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 			"jobs": createdJobs,
 		})
 		return
+	}
+
+	// If no specific items were provided, check if the URL is an inspectable collection
+	// (such as an Instagram Highlight reel or multi-item playlist) and auto-expand into jobs for all items.
+	if len(req.Items) == 0 && !strings.Contains(req.URL, "item=") && !strings.Contains(req.URL, "index=") {
+		if h.resolver != nil {
+			if info, err := h.resolver.Inspect(ctx, req.URL); err == nil && len(info.Items) > 1 {
+				var createdJobs []*jobs.Job
+				for _, item := range info.Items {
+					itemId := strings.TrimSpace(item.ID)
+					if itemId == "" {
+						itemId = strconv.Itoa(item.Index)
+					}
+					itemURL := req.URL
+					sep := "?"
+					if strings.Contains(itemURL, "?") {
+						sep = "&"
+					}
+					itemURL = fmt.Sprintf("%s%sitem=%s", itemURL, sep, itemId)
+
+					job, err := h.createAndEnqueueJob(ctx, itemURL, now, expiresAt)
+					if err != nil {
+						h.logger.Error("failed to create/enqueue job", "error", err, "item", itemId)
+						continue
+					}
+					createdJobs = append(createdJobs, job)
+				}
+				if len(createdJobs) > 0 {
+					writeJSON(w, http.StatusAccepted, map[string]any{
+						"jobs": createdJobs,
+					})
+					return
+				}
+			}
+		}
 	}
 
 	singleURL := req.URL

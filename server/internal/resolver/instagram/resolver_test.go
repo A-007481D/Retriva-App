@@ -458,6 +458,9 @@ func TestInspectAndResolveHighlightGraphQL(t *testing.T) {
 	if media1.MIMEType != "video/mp4" {
 		t.Errorf("expected video/mp4, got %q", media1.MIMEType)
 	}
+	if media1.Filename != "Highlight by omnia7086 - 1 of 2 [4016792134560039347].mp4" {
+		t.Errorf("expected filename 'Highlight by omnia7086 - 1 of 2 [4016792134560039347].mp4', got %q", media1.Filename)
+	}
 
 	// 3. Resolve Highlight with specific item ID
 	media2, err := r.Resolve(ctx, "https://www.instagram.com/stories/highlights/18008730106751263/?item=4016791798243980558")
@@ -469,5 +472,8 @@ func TestInspectAndResolveHighlightGraphQL(t *testing.T) {
 	}
 	if media2.MIMEType != "image/jpeg" {
 		t.Errorf("expected image/jpeg, got %q", media2.MIMEType)
+	}
+	if media2.Filename != "Highlight by omnia7086 - 2 of 2 [4016791798243980558].jpg" {
+		t.Errorf("expected filename 'Highlight by omnia7086 - 2 of 2 [4016791798243980558].jpg', got %q", media2.Filename)
 	}
 }

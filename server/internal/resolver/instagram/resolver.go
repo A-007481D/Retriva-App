@@ -1070,7 +1070,7 @@ func (r *Resolver) resolveHighlight(ctx context.Context, parsedURL *url.URL, hig
 		}
 	}
 
-	selectedItem, _ := selectItem(reel.Items, itemParam)
+	selectedItem, itemIndex := selectItem(reel.Items, itemParam)
 	if selectedItem == nil && itemParam != "" {
 		if it, err := r.fetchMediaInfo(ctx, itemParam); err == nil && it != nil {
 			selectedItem = it
@@ -1093,6 +1093,11 @@ func (r *Resolver) resolveHighlight(ctx context.Context, parsedURL *url.URL, hig
 		itemPK = selectedItem.Code
 	}
 
+	highlightTitle := reel.Title
+	if highlightTitle == "" || highlightTitle == "ً" {
+		highlightTitle = fmt.Sprintf("Highlight by %s", username)
+	}
+
 	var downloadURL string
 	var mimeType string
 	var filename string
@@ -1103,14 +1108,22 @@ func (r *Resolver) resolveHighlight(ctx context.Context, parsedURL *url.URL, hig
 		}
 		downloadURL = selectedItem.ImageVersions.Candidates[0].URL
 		mimeType = "image/jpeg"
-		filename = fmt.Sprintf("Photo by %s [%s].jpg", username, itemPK)
+		if len(reel.Items) > 1 {
+			filename = fmt.Sprintf("%s - %d of %d [%s].jpg", highlightTitle, itemIndex, len(reel.Items), itemPK)
+		} else {
+			filename = fmt.Sprintf("%s [%s].jpg", highlightTitle, itemPK)
+		}
 	} else { // Video
 		if len(selectedItem.VideoVersions) == 0 {
 			return nil, fmt.Errorf("no video versions found for video item")
 		}
 		downloadURL = selectedItem.VideoVersions[0].URL
 		mimeType = "video/mp4"
-		filename = fmt.Sprintf("Video by %s [%s].mp4", username, itemPK)
+		if len(reel.Items) > 1 {
+			filename = fmt.Sprintf("%s - %d of %d [%s].mp4", highlightTitle, itemIndex, len(reel.Items), itemPK)
+		} else {
+			filename = fmt.Sprintf("%s [%s].mp4", highlightTitle, itemPK)
+		}
 	}
 
 	filename = security.SanitizeFilename(filename)
