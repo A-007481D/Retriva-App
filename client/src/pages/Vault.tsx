@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
   FolderArchive,
   Search,
@@ -20,6 +20,8 @@ import {
   AlertTriangle,
   Loader2,
   CheckCheck,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { getVault, getMediaFileUrl, deleteMedia, batchDeleteMedia, type Media } from "../lib/api";
 import { cn } from "../lib/utils";
@@ -253,6 +255,59 @@ export const Vault: React.FC = () => {
       setIsDeleting(false);
     }
   };
+
+  const currentIndex = useMemo(() => {
+    if (!selectedMedia) return -1;
+    return filteredItems.findIndex((it) => it.id === selectedMedia.id);
+  }, [selectedMedia, filteredItems]);
+
+  const handlePrev = useCallback(() => {
+    if (filteredItems.length === 0) return;
+    if (currentIndex <= 0) {
+      setSelectedMedia(filteredItems[filteredItems.length - 1]);
+    } else {
+      setSelectedMedia(filteredItems[currentIndex - 1]);
+    }
+  }, [currentIndex, filteredItems]);
+
+  const handleNext = useCallback(() => {
+    if (filteredItems.length === 0) return;
+    if (currentIndex === -1 || currentIndex >= filteredItems.length - 1) {
+      setSelectedMedia(filteredItems[0]);
+    } else {
+      setSelectedMedia(filteredItems[currentIndex + 1]);
+    }
+  }, [currentIndex, filteredItems]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (deleteTarget) return;
+
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (selectedMedia) {
+        if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+          e.preventDefault();
+          handlePrev();
+        } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+          e.preventDefault();
+          handleNext();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setSelectedMedia(null);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedMedia, deleteTarget, handlePrev, handleNext]);
 
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every((it) => selectedIds.has(it.id));
@@ -661,18 +716,27 @@ export const Vault: React.FC = () => {
             >
               {/* Modal Header */}
               <div className="p-4 sm:px-6 flex items-center justify-between border-b border-white/[0.08]">
-                <div className="truncate pr-4">
-                  <h3 className="text-sm sm:text-base font-bold text-white truncate">
-                    {selectedMedia.filename}
-                  </h3>
-                  <div className="flex items-center gap-3 text-xs text-zinc-400 mt-0.5 font-mono">
-                    <span>{formatBytes(selectedMedia.sizeBytes)}</span>
-                    <span>•</span>
-                    <span>{formatDate(selectedMedia.createdAt)}</span>
-                    <span>•</span>
-                    <span className="text-emerald-400 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" /> Permanent Retention
-                    </span>
+                <div className="truncate pr-4 flex items-center gap-3">
+                  <div className="truncate">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm sm:text-base font-bold text-white truncate">
+                        {selectedMedia.filename}
+                      </h3>
+                      {currentIndex >= 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-white/10 text-[11px] font-mono text-zinc-300 font-semibold flex-shrink-0">
+                          {currentIndex + 1} / {filteredItems.length}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-zinc-400 mt-0.5 font-mono">
+                      <span>{formatBytes(selectedMedia.sizeBytes)}</span>
+                      <span>•</span>
+                      <span>{formatDate(selectedMedia.createdAt)}</span>
+                      <span>•</span>
+                      <span className="text-emerald-400 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3" /> Permanent Retention
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -705,9 +769,25 @@ export const Vault: React.FC = () => {
               </div>
 
               {/* Modal Viewer */}
-              <div className="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-[360px]">
+              <div className="relative flex-1 overflow-hidden bg-black flex items-center justify-center p-2 min-h-[360px] group/viewer">
+                {/* Previous Button */}
+                {filteredItems.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePrev();
+                    }}
+                    className="absolute left-3.5 z-20 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white border border-white/20 backdrop-blur-md flex items-center justify-center transition-all opacity-70 hover:opacity-100 hover:scale-105 shadow-lg shadow-black/50"
+                    title="Previous media (Left Arrow ←)"
+                  >
+                    <ChevronLeft className="w-6 h-6 -ml-0.5" />
+                  </button>
+                )}
+
                 {selectedMedia.mimeType.startsWith("video") ? (
                   <video
+                    key={selectedMedia.id}
                     src={getMediaFileUrl(selectedMedia.id)}
                     controls
                     autoPlay
@@ -715,19 +795,48 @@ export const Vault: React.FC = () => {
                   />
                 ) : (
                   <img
+                    key={selectedMedia.id}
                     src={getMediaFileUrl(selectedMedia.id)}
                     alt={selectedMedia.filename}
                     className="max-h-[70vh] w-auto max-w-full object-contain rounded-xl"
                   />
                 )}
+
+                {/* Next Button */}
+                {filteredItems.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNext();
+                    }}
+                    className="absolute right-3.5 z-20 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white border border-white/20 backdrop-blur-md flex items-center justify-center transition-all opacity-70 hover:opacity-100 hover:scale-105 shadow-lg shadow-black/50"
+                    title="Next media (Right Arrow →)"
+                  >
+                    <ChevronRight className="w-6 h-6 -mr-0.5" />
+                  </button>
+                )}
               </div>
 
-              {/* Modal Footer / Source */}
-              {selectedMedia.sourceUrl && (
-                <div className="p-3 sm:px-6 bg-[#0c0d10] border-t border-white/[0.06] flex items-center justify-between text-xs text-zinc-400">
-                  <span className="font-mono text-zinc-500 truncate mr-2">
-                    Source: {selectedMedia.sourceUrl}
-                  </span>
+              {/* Modal Footer / Source & Keyboard Hints */}
+              <div className="p-3 sm:px-6 bg-[#0c0d10] border-t border-white/[0.06] flex items-center justify-between text-xs text-zinc-400">
+                <div className="flex items-center gap-3 truncate mr-2">
+                  <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-zinc-400 font-mono">
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white border border-white/10 font-mono text-[10px]">←</kbd>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white border border-white/10 font-mono text-[10px]">→</kbd>
+                    <span className="text-zinc-500">navigate</span>
+                    <span className="text-zinc-600 ml-1">•</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white border border-white/10 font-mono text-[10px] ml-1">ESC</kbd>
+                    <span className="text-zinc-500">close</span>
+                  </div>
+                  {selectedMedia.sourceUrl && (
+                    <span className="font-mono text-zinc-500 truncate hidden md:inline">
+                      Source: {selectedMedia.sourceUrl}
+                    </span>
+                  )}
+                </div>
+
+                {selectedMedia.sourceUrl && (
                   <a
                     href={selectedMedia.sourceUrl}
                     target="_blank"
@@ -737,8 +846,8 @@ export const Vault: React.FC = () => {
                     <span>Original Post</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
-                </div>
-              )}
+                )}
+              </div>
             </motion.div>
           </div>
         )}
