@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   FolderArchive,
   Search,
@@ -23,6 +23,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { getVault, getMediaFileUrl, deleteMedia, batchDeleteMedia, type Media } from "../lib/api";
 import { cn } from "../lib/utils";
@@ -139,6 +141,35 @@ export const Vault: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<string>("all");
   const [selectedMedia, setSelectedMedia] = useState<Media | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Audio / Mute persistence across video playback and sessions
+  const [isMuted, setIsMuted] = useState<boolean>(() => {
+    return localStorage.getItem("retriva_vault_muted") === "true";
+  });
+  const [volume, setVolume] = useState<number>(() => {
+    const saved = localStorage.getItem("retriva_vault_volume");
+    if (saved !== null) {
+      const v = parseFloat(saved);
+      if (!isNaN(v) && v >= 0 && v <= 1) return v;
+    }
+    return 1;
+  });
+
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      localStorage.setItem("retriva_vault_muted", String(next));
+      if (videoRef.current) {
+        videoRef.current.muted = next;
+        if (!next) {
+          videoRef.current.volume = volume;
+        }
+      }
+      return next;
+    });
+  }, [volume]);
 
   // Selection & Batch Delete state
   const [selectionMode, setSelectionMode] = useState(false);
@@ -477,13 +508,16 @@ export const Vault: React.FC = () => {
         } else if (e.key === "Escape") {
           e.preventDefault();
           setSelectedMedia(null);
+        } else if (e.key === "m" || e.key === "M") {
+          e.preventDefault();
+          toggleMute();
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedMedia, deleteTarget, handlePrev, handleNext]);
+  }, [selectedMedia, deleteTarget, handlePrev, handleNext, toggleMute]);
 
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every((it) => selectedIds.has(it.id));
@@ -608,7 +642,7 @@ export const Vault: React.FC = () => {
               </button>
 
               <a
-                href={fileUrl}
+                href={`${fileUrl}?download=1`}
                 download={item.filename}
                 onClick={(e) => e.stopPropagation()}
                 className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all"
@@ -1042,7 +1076,7 @@ export const Vault: React.FC = () => {
                   </button>
 
                   <a
-                    href={getMediaFileUrl(selectedMedia.id)}
+                    href={`${getMediaFileUrl(selectedMedia.id)}?download=1`}
                     download={selectedMedia.filename}
                     className="h-9 px-3.5 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/20"
                   >
@@ -1077,13 +1111,61 @@ export const Vault: React.FC = () => {
                 )}
 
                 {selectedMedia.mimeType.startsWith("video") ? (
-                  <video
-                    key={selectedMedia.id}
-                    src={getMediaFileUrl(selectedMedia.id)}
-                    controls
-                    autoPlay
-                    className="max-h-[70vh] w-auto max-w-full rounded-xl"
-                  />
+                  <div className="relative max-h-[70vh] flex items-center justify-center">
+                    <video
+                      ref={videoRef}
+                      key={selectedMedia.id}
+                      src={getMediaFileUrl(selectedMedia.id)}
+                      controls
+                      autoPlay
+                      muted={isMuted}
+                      onVolumeChange={(e) => {
+                        const v = e.currentTarget;
+                        setIsMuted(v.muted);
+                        localStorage.setItem("retriva_vault_muted", String(v.muted));
+                        if (!v.muted) {
+                          setVolume(v.volume);
+                          localStorage.setItem("retriva_vault_volume", String(v.volume));
+                        }
+                      }}
+                      onLoadedMetadata={(e) => {
+                        const v = e.currentTarget;
+                        v.muted = isMuted;
+                        if (!isMuted) {
+                          v.volume = volume;
+                        }
+                      }}
+                      className="max-h-[70vh] w-auto max-w-full rounded-xl"
+                    />
+
+                    {/* Quick Persistent Mute / Audio Toggle Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleMute();
+                      }}
+                      className={cn(
+                        "absolute top-3 right-3 z-30 px-2.5 py-1.5 rounded-xl backdrop-blur-md border text-xs font-semibold flex items-center gap-1.5 transition-all shadow-lg",
+                        isMuted
+                          ? "bg-rose-500/25 text-rose-300 border-rose-500/40 hover:bg-rose-500/35"
+                          : "bg-black/70 text-emerald-300 border-white/20 hover:bg-black/90"
+                      )}
+                      title={isMuted ? "Unmute sound (or press M)" : "Mute sound (or press M)"}
+                    >
+                      {isMuted ? (
+                        <>
+                          <VolumeX className="w-4 h-4 text-rose-400" />
+                          <span className="text-[11px] font-mono">Silenced</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-4 h-4 text-emerald-400" />
+                          <span className="text-[11px] font-mono">Sound On</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 ) : (
                   <img
                     key={selectedMedia.id}
@@ -1116,6 +1198,9 @@ export const Vault: React.FC = () => {
                     <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white border border-white/10 font-mono text-[10px]">←</kbd>
                     <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white border border-white/10 font-mono text-[10px]">→</kbd>
                     <span className="text-zinc-500">navigate</span>
+                    <span className="text-zinc-600 ml-1">•</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white border border-white/10 font-mono text-[10px] ml-1">M</kbd>
+                    <span className="text-zinc-500">mute</span>
                     <span className="text-zinc-600 ml-1">•</span>
                     <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white border border-white/10 font-mono text-[10px] ml-1">ESC</kbd>
                     <span className="text-zinc-500">close</span>

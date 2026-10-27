@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/A-007481D/retriva/server/internal/storage"
@@ -47,6 +48,10 @@ func (h *Handler) handleGetMediaFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Media not found")
 		return
 	}
+	if m == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Media not found")
+		return
+	}
 
 	if m.StorageKey == "" {
 		writeError(w, http.StatusNotFound, "not_ready", "Media file is not ready yet")
@@ -65,15 +70,31 @@ func (h *Handler) handleGetMediaFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	w.Header().Set("Content-Type", m.MIMEType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+m.Filename+`"`)
-	if m.SizeBytes != nil {
-		// Can't use strconv if we use net/http serveContent, but we stream manually here
-		// Actually for Range requests we'd use http.ServeContent, but our storage returns io.ReadCloser
-		// We can just stream it down. Range requests would be nice in the future.
+	mimeType := m.MIMEType
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	dispositionType := "inline"
+	if r.URL.Query().Get("download") == "1" {
+		dispositionType = "attachment"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, dispositionType, m.Filename))
+
+	// If the storage reader implements io.ReadSeeker (e.g. *os.File from filesystem storage),
+	// use http.ServeContent to properly support HTTP Range requests (206 Partial Content),
+	// allowing video players to seek, scrub forward/backward, and buffer smoothly.
+	if seeker, ok := reader.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, m.Filename, m.CreatedAt, seeker)
+		return
 	}
 
-	io.Copy(w, reader)
+	if m.SizeBytes != nil {
+		w.Header().Set("Content-Length", strconv.FormatInt(*m.SizeBytes, 10))
+	}
+	_, _ = io.Copy(w, reader)
 }
 
 func (h *Handler) deleteMediaItem(ctx context.Context, id string) error {
