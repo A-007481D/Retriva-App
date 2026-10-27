@@ -378,3 +378,96 @@ func TestInspectAndResolveStory(t *testing.T) {
 		t.Errorf("expected story2 video URL, got %q", mediaByStoryID.URL)
 	}
 }
+
+func TestInspectAndResolveHighlightGraphQL(t *testing.T) {
+	mockGQLResponse := map[string]any{
+		"data": map[string]any{
+			"reels_media": []map[string]any{
+				{
+					"__typename": "GraphHighlightReel",
+					"id":         "18008730106751263",
+					"owner": map[string]any{
+						"id":       "3422436823",
+						"username": "omnia7086",
+					},
+					"items": []map[string]any{
+						{
+							"id":                 "4016792134560039347",
+							"is_video":           true,
+							"video_duration":     15.0,
+							"taken_at_timestamp": 1729000000,
+							"display_url":        "https://cdn.example.com/thumb1.jpg",
+							"video_resources": []map[string]any{
+								{
+									"src":           "https://cdn.example.com/video1.mp4",
+									"config_width":  720,
+									"config_height": 1280,
+								},
+							},
+						},
+						{
+							"id":                 "4016791798243980558",
+							"is_video":           false,
+							"taken_at_timestamp": 1729000100,
+							"display_url":        "https://cdn.example.com/photo2.jpg",
+						},
+					},
+				},
+			},
+		},
+		"status": "ok",
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockGQLResponse)
+	}))
+	defer srv.Close()
+
+	r := New("")
+	r.apiBaseURL = srv.URL
+	ctx := context.Background()
+
+	// 1. Inspect Highlight
+	info, err := r.Inspect(ctx, "https://www.instagram.com/stories/highlights/18008730106751263/")
+	if err != nil {
+		t.Fatalf("Inspect highlight failed: %v", err)
+	}
+
+	if info.Count != 2 {
+		t.Fatalf("expected count 2, got %d", info.Count)
+	}
+	if info.Title != "Highlight by omnia7086" {
+		t.Errorf("expected title 'Highlight by omnia7086', got %q", info.Title)
+	}
+	if info.Items[0].Type != "video" || info.Items[0].ID != "4016792134560039347" {
+		t.Errorf("item 0 mismatch: %+v", info.Items[0])
+	}
+	if info.Items[1].Type != "photo" || info.Items[1].ID != "4016791798243980558" {
+		t.Errorf("item 1 mismatch: %+v", info.Items[1])
+	}
+
+	// 2. Resolve Highlight (default item 1)
+	media1, err := r.Resolve(ctx, "https://www.instagram.com/stories/highlights/18008730106751263/")
+	if err != nil {
+		t.Fatalf("Resolve highlight failed: %v", err)
+	}
+	if media1.URL != "https://cdn.example.com/video1.mp4" {
+		t.Errorf("expected video1 URL, got %q", media1.URL)
+	}
+	if media1.MIMEType != "video/mp4" {
+		t.Errorf("expected video/mp4, got %q", media1.MIMEType)
+	}
+
+	// 3. Resolve Highlight with specific item ID
+	media2, err := r.Resolve(ctx, "https://www.instagram.com/stories/highlights/18008730106751263/?item=4016791798243980558")
+	if err != nil {
+		t.Fatalf("Resolve highlight with item failed: %v", err)
+	}
+	if media2.URL != "https://cdn.example.com/photo2.jpg" {
+		t.Errorf("expected photo2 URL, got %q", media2.URL)
+	}
+	if media2.MIMEType != "image/jpeg" {
+		t.Errorf("expected image/jpeg, got %q", media2.MIMEType)
+	}
+}

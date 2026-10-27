@@ -241,7 +241,7 @@ export const Home: React.FC = () => {
 
               // Pre-selection:
               const matchIndex = url.match(/[?&](?:img_index|item|index)=(\d+)/);
-              const matchStoryId = url.match(/\/stories\/[^/]+\/(\d+)/);
+              const matchStoryId = !isHighlight ? url.match(/\/stories\/[^/]+\/(\d+)/) : null;
 
               if (matchIndex && matchIndex[1]) {
                 setSelectedIds(new Set([matchIndex[1]]));
@@ -253,6 +253,9 @@ export const Home: React.FC = () => {
                 } else {
                   setSelectedIds(new Set());
                 }
+              } else if (isHighlight || isPostOrReel) {
+                // For highlights and carousels, preselect all items by default for fast one-click download
+                setSelectedIds(new Set(items.map((it) => it.id)));
               } else {
                 // If url without singular ID (/stories/username/), show all unselected so user can pick
                 setSelectedIds(new Set());

@@ -13,8 +13,10 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/A-007481D/retriva/server/internal/resolver"
@@ -101,6 +103,7 @@ type igReel struct {
 	ID    string   `json:"id"`
 	Title string   `json:"title"`
 	User  struct {
+		ID       string `json:"id"`
 		Username string `json:"username"`
 		FullName string `json:"full_name"`
 	} `json:"user"`
@@ -112,16 +115,63 @@ type igFeedResponse struct {
 	Reels  map[string]igReel `json:"reels"`
 }
 
+type cachedReel struct {
+	reel      *igReel
+	expiresAt time.Time
+}
+
+type igGQLReelsMediaResponse struct {
+	Data struct {
+		ReelsMedia []struct {
+			Typename        string `json:"__typename"`
+			ID              string `json:"id"`
+			LatestReelMedia int64  `json:"latest_reel_media"`
+			Owner           struct {
+				ID            string `json:"id"`
+				Username      string `json:"username"`
+				ProfilePicURL string `json:"profile_pic_url"`
+			} `json:"owner"`
+			Items []struct {
+				Typename         string  `json:"__typename"`
+				ID               string  `json:"id"`
+				IsVideo          bool    `json:"is_video"`
+				TakenAtTimestamp int64   `json:"taken_at_timestamp"`
+				VideoDuration    float64 `json:"video_duration"`
+				DisplayURL       string  `json:"display_url"`
+				DisplayResources []struct {
+					Src          string `json:"src"`
+					ConfigWidth  int    `json:"config_width"`
+					ConfigHeight int    `json:"config_height"`
+				} `json:"display_resources"`
+				VideoResources []struct {
+					Src          string `json:"src"`
+					ConfigWidth  int    `json:"config_width"`
+					ConfigHeight int    `json:"config_height"`
+					MimeType     string `json:"mime_type"`
+				} `json:"video_resources"`
+				Owner struct {
+					ID       string `json:"id"`
+					Username string `json:"username"`
+				} `json:"owner"`
+			} `json:"items"`
+		} `json:"reels_media"`
+	} `json:"data"`
+	Status string `json:"status"`
+}
+
 // Resolver handles Instagram URLs (posts, carousels, reels, stories, highlights) directly using the Instagram mobile API.
 type Resolver struct {
 	cookiesPath string
 	apiBaseURL  string
+	cacheMu     sync.RWMutex
+	reelCache   map[string]cachedReel
 }
 
 // New creates an Instagram resolver with optional Netscape cookies path.
 func New(cookiesPath string) *Resolver {
 	return &Resolver{
 		cookiesPath: cookiesPath,
+		reelCache:   make(map[string]cachedReel),
 	}
 }
 
@@ -233,7 +283,171 @@ func (r *Resolver) createHTTPClient() (*http.Client, error) {
 	}, nil
 }
 
+func (r *Resolver) fetchGraphQLReelsMedia(ctx context.Context, reelIDs, highlightReelIDs []string) (*igReel, error) {
+	client, err := r.createHTTPClient()
+	if err != nil {
+		return nil, fmt.Errorf("create client: %w", err)
+	}
+
+	if reelIDs == nil {
+		reelIDs = []string{}
+	}
+	if highlightReelIDs == nil {
+		highlightReelIDs = []string{}
+	}
+
+	variables := map[string]any{
+		"reel_ids":             reelIDs,
+		"tag_names":            []string{},
+		"location_ids":         []string{},
+		"highlight_reel_ids":   highlightReelIDs,
+		"precomposed_overlay": false,
+	}
+	varBytes, err := json.Marshal(variables)
+	if err != nil {
+		return nil, fmt.Errorf("marshal variables: %w", err)
+	}
+
+	queryHash := "45246d3fe16ccc6577e0bd297a5db1ab"
+	baseURL := "https://www.instagram.com"
+	if r.apiBaseURL != "" {
+		baseURL = r.apiBaseURL
+	}
+	gqlURL := fmt.Sprintf("%s/graphql/query/?query_hash=%s&variables=%s", baseURL, queryHash, url.QueryEscape(string(varBytes)))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gqlURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create gql request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("X-IG-App-ID", "936619743392459")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Referer", "https://www.instagram.com/")
+
+	if client.Jar != nil {
+		if u, err := url.Parse("https://www.instagram.com"); err == nil {
+			for _, c := range client.Jar.Cookies(u) {
+				if c.Name == "csrftoken" && c.Value != "" {
+					req.Header.Set("X-CSRFToken", c.Value)
+					break
+				}
+			}
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("graphql request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("graphql returned status %d", resp.StatusCode)
+	}
+
+	var data igGQLReelsMediaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("decode graphql response: %w", err)
+	}
+
+	if len(data.Data.ReelsMedia) == 0 {
+		return nil, fmt.Errorf("empty reels_media returned by graphql")
+	}
+
+	gReel := data.Data.ReelsMedia[0]
+	username := gReel.Owner.Username
+	if username == "" {
+		username = "instagram_user"
+	}
+
+	reel := &igReel{
+		ID:    gReel.ID,
+		Title: fmt.Sprintf("Highlight by %s", username),
+	}
+	reel.User.ID = gReel.Owner.ID
+	reel.User.Username = gReel.Owner.Username
+
+	for _, gItem := range gReel.Items {
+		item := igItem{
+			PK:            json.Number(gItem.ID),
+			ID:            gItem.ID,
+			Code:          gItem.ID,
+			TakenAt:       gItem.TakenAtTimestamp,
+			VideoDuration: gItem.VideoDuration,
+		}
+		item.User.ID = gItem.Owner.ID
+		item.User.Username = gItem.Owner.Username
+		if item.User.Username == "" {
+			item.User.Username = gReel.Owner.Username
+		}
+
+		if gItem.IsVideo {
+			item.MediaType = 2 // Video
+			for _, vr := range gItem.VideoResources {
+				if vr.Src != "" {
+					item.VideoVersions = append(item.VideoVersions, igVideoVersion{
+						URL:    vr.Src,
+						Width:  vr.ConfigWidth,
+						Height: vr.ConfigHeight,
+					})
+				}
+			}
+			sort.Slice(item.VideoVersions, func(i, j int) bool {
+				return item.VideoVersions[i].Width*item.VideoVersions[i].Height > item.VideoVersions[j].Width*item.VideoVersions[j].Height
+			})
+		} else {
+			item.MediaType = 1 // Photo
+		}
+
+		if gItem.DisplayURL != "" {
+			item.ImageVersions.Candidates = append(item.ImageVersions.Candidates, igCandidate{
+				URL: gItem.DisplayURL,
+			})
+		}
+		for _, dr := range gItem.DisplayResources {
+			if dr.Src != "" {
+				item.ImageVersions.Candidates = append(item.ImageVersions.Candidates, igCandidate{
+					URL:    dr.Src,
+					Width:  dr.ConfigWidth,
+					Height: dr.ConfigHeight,
+				})
+			}
+		}
+		sort.Slice(item.ImageVersions.Candidates, func(i, j int) bool {
+			return item.ImageVersions.Candidates[i].Width*item.ImageVersions.Candidates[i].Height > item.ImageVersions.Candidates[j].Width*item.ImageVersions.Candidates[j].Height
+		})
+
+		reel.Items = append(reel.Items, item)
+	}
+
+	return reel, nil
+}
+
 func (r *Resolver) fetchReel(ctx context.Context, highlightID string) (*igReel, error) {
+	// 1. Check in-memory cache
+	r.cacheMu.RLock()
+	if c, ok := r.reelCache[highlightID]; ok && time.Now().Before(c.expiresAt) {
+		r.cacheMu.RUnlock()
+		return c.reel, nil
+	}
+	r.cacheMu.RUnlock()
+
+	// 2. Primary: Fetch via Instagram GraphQL (query_hash: 45246d3fe16ccc6577e0bd297a5db1ab)
+	if reel, err := r.fetchGraphQLReelsMedia(ctx, nil, []string{highlightID}); err == nil && len(reel.Items) > 0 {
+		r.cacheMu.Lock()
+		if r.reelCache == nil {
+			r.reelCache = make(map[string]cachedReel)
+		}
+		r.reelCache[highlightID] = cachedReel{
+			reel:      reel,
+			expiresAt: time.Now().Add(10 * time.Minute),
+		}
+		r.cacheMu.Unlock()
+		return reel, nil
+	}
+
+	// 3. Fallback: Fetch via mobile API feed/reels_media endpoint
 	client, err := r.createHTTPClient()
 	if err != nil {
 		return nil, fmt.Errorf("create client: %w", err)
@@ -249,30 +463,29 @@ func (r *Resolver) fetchReel(ctx context.Context, highlightID string) (*igReel, 
 	req.Header.Set("X-IG-App-ID", "936619743392459")
 
 	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("instagram api request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("instagram api returned status %d", resp.StatusCode)
-	}
-
-	var data igFeedResponse
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, fmt.Errorf("decode instagram response: %w", err)
-	}
-
-	reelKey := "highlight:" + highlightID
-	reel, ok := data.Reels[reelKey]
-	if !ok {
-		if len(data.Reels) == 0 {
-			return nil, fmt.Errorf("highlight %s not found or has been deleted/removed (Instagram returned 404 / empty reel)", highlightID)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var data igFeedResponse
+			if err := json.NewDecoder(resp.Body).Decode(&data); err == nil {
+				reelKey := "highlight:" + highlightID
+				if reel, ok := data.Reels[reelKey]; ok && len(reel.Items) > 0 {
+					r.cacheMu.Lock()
+					if r.reelCache == nil {
+						r.reelCache = make(map[string]cachedReel)
+					}
+					r.reelCache[highlightID] = cachedReel{
+						reel:      &reel,
+						expiresAt: time.Now().Add(10 * time.Minute),
+					}
+					r.cacheMu.Unlock()
+					return &reel, nil
+				}
+			}
 		}
-		return nil, fmt.Errorf("highlight %s not found in response", highlightID)
 	}
 
-	return &reel, nil
+	return nil, fmt.Errorf("highlight %s not found or has been deleted/removed (empty reel)", highlightID)
 }
 
 func (r *Resolver) fetchMediaInfo(ctx context.Context, mediaID string) (*igItem, error) {
@@ -360,11 +573,13 @@ func (r *Resolver) inspectHighlight(ctx context.Context, highlightID string) (*r
 		}
 
 		itemType := "video"
+		capType := "Video"
 		if it.MediaType == 1 {
 			itemType = "photo"
+			capType = "Photo"
 		}
 
-		title := fmt.Sprintf("%s by %s", strings.Title(itemType), user)
+		title := fmt.Sprintf("%s %d by @%s", capType, i+1, user)
 
 		thumb := ""
 		if len(it.ImageVersions.Candidates) > 0 {
@@ -494,6 +709,11 @@ func (r *Resolver) fetchUserReel(ctx context.Context, username, storyID string) 
 
 	if userID == "" {
 		return nil, fmt.Errorf("could not determine user ID for @%s (please ensure cookies.txt has a valid sessionid)", username)
+	}
+
+	// 3. Try GraphQL reels_media query first
+	if reel, err := r.fetchGraphQLReelsMedia(ctx, []string{userID}, nil); err == nil && len(reel.Items) > 0 {
+		return reel, nil
 	}
 
 	apiURL := fmt.Sprintf("%s/api/v1/feed/reels_media/?reel_ids=%s", r.base(), userID)
@@ -774,6 +994,14 @@ func (r *Resolver) resolveStory(ctx context.Context, parsedURL *url.URL, usernam
 	}
 
 	selectedItem, _ := selectItem(reel.Items, itemParam)
+	if selectedItem == nil && itemParam != "" {
+		if it, err := r.fetchMediaInfo(ctx, itemParam); err == nil && it != nil {
+			selectedItem = it
+		}
+	}
+	if selectedItem == nil {
+		return nil, fmt.Errorf("item %s not found in highlight", itemParam)
+	}
 
 	user := selectedItem.User.Username
 	if user == "" {
@@ -843,6 +1071,14 @@ func (r *Resolver) resolveHighlight(ctx context.Context, parsedURL *url.URL, hig
 	}
 
 	selectedItem, _ := selectItem(reel.Items, itemParam)
+	if selectedItem == nil && itemParam != "" {
+		if it, err := r.fetchMediaInfo(ctx, itemParam); err == nil && it != nil {
+			selectedItem = it
+		}
+	}
+	if selectedItem == nil {
+		return nil, fmt.Errorf("item %s not found in highlight", itemParam)
+	}
 
 	username := selectedItem.User.Username
 	if username == "" {
