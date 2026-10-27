@@ -267,7 +267,7 @@ func (r *Resolver) fetchReel(ctx context.Context, highlightID string) (*igReel, 
 	reel, ok := data.Reels[reelKey]
 	if !ok {
 		if len(data.Reels) == 0 {
-			return nil, fmt.Errorf("Instagram returned empty highlight reel for %s (Meta is rate-limiting automated requests or the session is restricted)", highlightID)
+			return nil, fmt.Errorf("highlight %s not found or has been deleted/removed (Instagram returned 404 / empty reel)", highlightID)
 		}
 		return nil, fmt.Errorf("highlight %s not found in response", highlightID)
 	}
