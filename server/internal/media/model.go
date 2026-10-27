@@ -70,6 +70,7 @@ type Repository interface {
 	List(ctx context.Context, filter ListFilter) ([]*Item, error)
 	Update(ctx context.Context, item *Item) error
 	Delete(ctx context.Context, id string) error
+	HardDelete(ctx context.Context, id string) error
 	ListExpired(ctx context.Context) ([]*Item, error)
 	Count(ctx context.Context, filter ListFilter) (int, error)
 }

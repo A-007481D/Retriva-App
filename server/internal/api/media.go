@@ -1,9 +1,13 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/A-007481D/retriva/server/internal/storage"
 )
@@ -70,4 +74,99 @@ func (h *Handler) handleGetMediaFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	io.Copy(w, reader)
+}
+
+func (h *Handler) deleteMediaItem(ctx context.Context, id string) error {
+	m, err := h.mediaRepo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		return errors.New("media not found")
+	}
+
+	// Delete file from disk storage
+	if m.StorageKey != "" {
+		if err := h.storage.Delete(ctx, m.StorageKey); err != nil {
+			h.logger.Warn("failed to delete media file from storage", "id", id, "key", m.StorageKey, "error", err)
+		}
+	}
+	if m.ThumbKey != "" {
+		if err := h.storage.Delete(ctx, m.ThumbKey); err != nil {
+			h.logger.Warn("failed to delete thumb file from storage", "id", id, "key", m.ThumbKey, "error", err)
+		}
+	}
+
+	// Remove from database
+	if err := h.mediaRepo.HardDelete(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete media from database: %w", err)
+	}
+
+	return nil
+}
+
+func (h *Handler) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing_id", "Media ID is required")
+		return
+	}
+
+	ctx := r.Context()
+	err := h.deleteMediaItem(ctx, id)
+	if err != nil {
+		if err.Error() == "media not found" {
+			writeError(w, http.StatusNotFound, "not_found", "Media not found")
+			return
+		}
+		h.logger.Error("failed to delete media", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "delete_error", "Failed to delete media")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"id":      id,
+	})
+}
+
+type batchDeleteMediaRequest struct {
+	IDs []string `json:"ids"`
+}
+
+func (h *Handler) handleBatchDeleteMedia(w http.ResponseWriter, r *http.Request) {
+	var req batchDeleteMediaRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON request body")
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "No IDs provided")
+		return
+	}
+
+	ctx := r.Context()
+	deleted := make([]string, 0, len(req.IDs))
+	failed := make([]string, 0)
+
+	for _, id := range req.IDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if err := h.deleteMediaItem(ctx, id); err != nil {
+			h.logger.Warn("failed to delete media in batch", "id", id, "error", err)
+			failed = append(failed, id)
+		} else {
+			deleted = append(deleted, id)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"deleted": deleted,
+		"failed":  failed,
+		"total":   len(deleted),
+	})
 }

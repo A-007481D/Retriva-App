@@ -125,6 +125,26 @@ func TestSQLiteRepository_Delete(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_HardDelete(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSQLiteRepository(db.DB)
+	ctx := context.Background()
+
+	item := newTestItem()
+	repo.Create(ctx, item)
+	if err := repo.HardDelete(ctx, item.ID); err != nil {
+		t.Fatalf("HardDelete failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("Get returned error: %v", err)
+	}
+	if got != nil {
+		t.Fatal("expected item to be deleted from db")
+	}
+}
+
 func TestSQLiteRepository_List(t *testing.T) {
 	db := openTestDB(t)
 	repo := NewSQLiteRepository(db.DB)

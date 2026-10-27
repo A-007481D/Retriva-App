@@ -42,6 +42,7 @@ func (m *mockMediaRepo) Update(ctx context.Context, item *media.Item) error {
 	return nil
 }
 func (m *mockMediaRepo) Delete(ctx context.Context, id string) error               { return nil }
+func (m *mockMediaRepo) HardDelete(ctx context.Context, id string) error           { return nil }
 func (m *mockMediaRepo) ListExpired(ctx context.Context) ([]*media.Item, error)    { return nil, nil }
 func (m *mockMediaRepo) Count(ctx context.Context, filter media.ListFilter) (int, error) { return 0, nil }
 

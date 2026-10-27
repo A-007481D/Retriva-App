@@ -109,6 +109,20 @@ func (r *SQLiteRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *SQLiteRepository) HardDelete(ctx context.Context, id string) error {
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM history WHERE media_id = ?", id)
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM jobs WHERE media_id = ?", id)
+	res, err := r.db.ExecContext(ctx, "DELETE FROM media WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("media.HardDelete: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("media not found")
+	}
+	return nil
+}
+
 func (r *SQLiteRepository) ListExpired(ctx context.Context) ([]*Item, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	rows, err := r.db.QueryContext(ctx, `

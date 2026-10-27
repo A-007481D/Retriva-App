@@ -14,8 +14,14 @@ import {
   RefreshCw,
   Clock,
   ShieldCheck,
+  Trash2,
+  CheckSquare,
+  Square,
+  AlertTriangle,
+  Loader2,
+  CheckCheck,
 } from "lucide-react";
-import { getVault, getMediaFileUrl, type Media } from "../lib/api";
+import { getVault, getMediaFileUrl, deleteMedia, batchDeleteMedia, type Media } from "../lib/api";
 import { cn } from "../lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -42,6 +48,10 @@ function formatDate(dateStr: string): string {
   }
 }
 
+type DeleteTarget =
+  | { type: "single"; item: Media }
+  | { type: "batch"; ids: string[]; count: number; totalBytes: number };
+
 export const Vault: React.FC = () => {
   const [items, setItems] = useState<Media[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -50,6 +60,15 @@ export const Vault: React.FC = () => {
   const [filter, setFilter] = useState<"all" | "video" | "photo">("all");
   const [selectedMedia, setSelectedMedia] = useState<Media | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Selection & Batch Delete state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Delete confirmation modal state
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [totalCount, setTotalCount] = useState<number>(0);
 
@@ -102,6 +121,16 @@ export const Vault: React.FC = () => {
     });
   }, [items, filter, search]);
 
+  const selectedSize = useMemo(() => {
+    let sum = 0;
+    for (const it of items) {
+      if (selectedIds.has(it.id)) {
+        sum += it.sizeBytes || 0;
+      }
+    }
+    return sum;
+  }, [items, selectedIds]);
+
   const handleCopyLink = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const url = window.location.origin + getMediaFileUrl(id);
@@ -114,8 +143,122 @@ export const Vault: React.FC = () => {
     }
   };
 
+  const toggleSelect = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+    if (!selectionMode) {
+      setSelectionMode(true);
+    }
+  };
+
+  const handleSelectAllFiltered = () => {
+    const allFilteredIds = filteredItems.map((it) => it.id);
+    const allSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedIds.has(id));
+
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        allFilteredIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        allFilteredIds.forEach((id) => next.add(id));
+        return next;
+      });
+      setSelectionMode(true);
+    }
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const openSingleDelete = (item: Media, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setDeleteError(null);
+    setDeleteTarget({ type: "single", item });
+  };
+
+  const openBatchDelete = () => {
+    if (selectedIds.size === 0) return;
+    setDeleteError(null);
+    setDeleteTarget({
+      type: "batch",
+      ids: Array.from(selectedIds),
+      count: selectedIds.size,
+      totalBytes: selectedSize,
+    });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      if (deleteTarget.type === "single") {
+        const targetId = deleteTarget.item.id;
+        await deleteMedia(targetId);
+
+        setItems((prev) => prev.filter((it) => it.id !== targetId));
+        setTotalCount((prev) => Math.max(0, prev - 1));
+
+        if (selectedMedia?.id === targetId) {
+          setSelectedMedia(null);
+        }
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(targetId);
+          return next;
+        });
+      } else {
+        const ids = deleteTarget.ids;
+        const res = await batchDeleteMedia(ids);
+        const deletedSet = new Set(res.deleted);
+
+        setItems((prev) => prev.filter((it) => !deletedSet.has(it.id)));
+        setTotalCount((prev) => Math.max(0, prev - res.deleted.length));
+
+        if (selectedMedia && deletedSet.has(selectedMedia.id)) {
+          setSelectedMedia(null);
+        }
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          res.deleted.forEach((id) => next.delete(id));
+          return next;
+        });
+
+        if (res.failed && res.failed.length > 0) {
+          setDeleteError(`Deleted ${res.deleted.length} file(s), but ${res.failed.length} failed.`);
+          return;
+        }
+        setSelectionMode(false);
+      }
+
+      setDeleteTarget(null);
+    } catch (err: any) {
+      setDeleteError(err.message || "Failed to delete file(s)");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const allVisibleSelected =
+    filteredItems.length > 0 && filteredItems.every((it) => selectedIds.has(it.id));
+
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-32">
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-36">
       {/* Page Title & Stats */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-8 border-b border-white/[0.08]">
         <div>
@@ -175,8 +318,8 @@ export const Vault: React.FC = () => {
           />
         </div>
 
-        {/* Filter Pills */}
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
+        {/* Filter Pills & Actions */}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
           <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/[0.08] text-xs">
             <button
               onClick={() => setFilter("all")}
@@ -226,6 +369,38 @@ export const Vault: React.FC = () => {
             </button>
           </div>
 
+          {/* Toggle Multi-Select Mode */}
+          <button
+            onClick={() => {
+              if (selectionMode) {
+                handleClearSelection();
+              } else {
+                setSelectionMode(true);
+              }
+            }}
+            className={cn(
+              "h-10 px-3.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all",
+              selectionMode
+                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                : "bg-white/[0.04] border-white/[0.08] text-zinc-300 hover:text-white hover:bg-white/[0.08]"
+            )}
+            title={selectionMode ? "Exit Select Mode" : "Select Multiple Files"}
+          >
+            <CheckSquare className="w-4 h-4 text-emerald-400" />
+            <span>{selectionMode ? "Done Selecting" : "Select"}</span>
+          </button>
+
+          {/* Select All Button when in selection mode */}
+          {selectionMode && filteredItems.length > 0 && (
+            <button
+              onClick={handleSelectAllFiltered}
+              className="h-10 px-3 rounded-xl bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] text-xs font-semibold text-zinc-300 hover:text-white flex items-center gap-1.5 transition-all"
+            >
+              <CheckCheck className="w-4 h-4 text-emerald-400" />
+              <span>{allVisibleSelected ? "Deselect All" : "Select All"}</span>
+            </button>
+          )}
+
           <button
             onClick={fetchItems}
             disabled={isLoading}
@@ -269,12 +444,24 @@ export const Vault: React.FC = () => {
           {filteredItems.map((item) => {
             const isVideo = item.mimeType.startsWith("video");
             const fileUrl = getMediaFileUrl(item.id);
+            const isSelected = selectedIds.has(item.id);
 
             return (
               <div
                 key={item.id}
-                onClick={() => setSelectedMedia(item)}
-                className="group relative aspect-[9/16] rounded-2xl overflow-hidden bg-[#121318] border border-white/[0.08] hover:border-emerald-500/40 transition-all duration-300 cursor-pointer flex flex-col justify-between hover:shadow-xl hover:shadow-black/60"
+                onClick={(e) => {
+                  if (selectionMode) {
+                    toggleSelect(item.id, e);
+                  } else {
+                    setSelectedMedia(item);
+                  }
+                }}
+                className={cn(
+                  "group relative aspect-[9/16] rounded-2xl overflow-hidden bg-[#121318] border transition-all duration-200 cursor-pointer flex flex-col justify-between hover:shadow-xl hover:shadow-black/60 select-none",
+                  isSelected
+                    ? "ring-2 ring-emerald-400 border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.25)] scale-[0.98]"
+                    : "border-white/[0.08] hover:border-emerald-500/40 hover:scale-[1.01]"
+                )}
               >
                 {/* Media Preview Media */}
                 {isVideo ? (
@@ -284,11 +471,13 @@ export const Vault: React.FC = () => {
                       preload="metadata"
                       className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
                     />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black transition-all">
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
+                    {!selectionMode && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black transition-all">
+                          <Play className="w-4 h-4 fill-current ml-0.5" />
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 ) : (
                   <img
@@ -302,23 +491,46 @@ export const Vault: React.FC = () => {
                 {/* Dark Gradient Overlay */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/60 pointer-events-none" />
 
-                {/* Top Badges */}
+                {/* Top Bar: Selection Checkbox & Type Badge */}
                 <div className="relative z-10 p-2.5 flex items-center justify-between">
-                  <span
+                  {/* Select Checkbox */}
+                  <button
+                    type="button"
+                    onClick={(e) => toggleSelect(item.id, e)}
                     className={cn(
-                      "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono uppercase tracking-wider backdrop-blur-md border flex items-center gap-1",
-                      isVideo
-                        ? "bg-teal-500/20 text-teal-300 border-teal-500/30"
-                        : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                      "w-6 h-6 rounded-lg flex items-center justify-center transition-all backdrop-blur-md border",
+                      isSelected
+                        ? "bg-emerald-500 text-black border-emerald-400 shadow-sm"
+                        : selectionMode
+                        ? "bg-black/60 border-white/30 text-white/40 hover:text-white hover:border-white/60"
+                        : "opacity-0 group-hover:opacity-100 bg-black/60 border-white/20 text-white/40 hover:text-white"
                     )}
+                    title={isSelected ? "Deselect item" : "Select item"}
                   >
-                    {isVideo ? <Video className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}
-                    <span>{isVideo ? "MP4" : "JPG"}</span>
-                  </span>
+                    {isSelected ? (
+                      <Check className="w-4 h-4 stroke-[3]" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 opacity-60" />
+                    )}
+                  </button>
 
-                  <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-zinc-300 font-semibold">
-                    {formatBytes(item.sizeBytes)}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono uppercase tracking-wider backdrop-blur-md border flex items-center gap-1",
+                        isVideo
+                          ? "bg-teal-500/20 text-teal-300 border-teal-500/30"
+                          : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                      )}
+                    >
+                      {isVideo ? <Video className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}
+                      <span>{isVideo ? "MP4" : "JPG"}</span>
+                    </span>
+
+                    <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-zinc-300 font-semibold">
+                      {formatBytes(item.sizeBytes)}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Bottom Details */}
@@ -333,7 +545,7 @@ export const Vault: React.FC = () => {
                       <span>{formatDate(item.createdAt).split(",")[0]}</span>
                     </span>
 
-                    {/* Quick Copy Link Button */}
+                    {/* Quick Action Buttons: Copy, Download, Delete */}
                     <div className="flex items-center gap-1">
                       <button
                         onClick={(e) => handleCopyLink(item.id, e)}
@@ -346,6 +558,7 @@ export const Vault: React.FC = () => {
                           <Copy className="w-3 h-3" />
                         )}
                       </button>
+
                       <a
                         href={fileUrl}
                         download={item.filename}
@@ -355,6 +568,14 @@ export const Vault: React.FC = () => {
                       >
                         <Download className="w-3 h-3" />
                       </a>
+
+                      <button
+                        onClick={(e) => openSingleDelete(item, e)}
+                        className="w-6 h-6 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 hover:text-rose-100 flex items-center justify-center transition-all"
+                        title="Delete file permanently"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -363,6 +584,60 @@ export const Vault: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* Floating Bottom Batch Action Bar */}
+      <AnimatePresence>
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 40 }}
+            className="fixed bottom-6 inset-x-0 mx-auto w-full max-w-xl z-40 px-4"
+          >
+            <div className="p-3 sm:px-5 rounded-2xl bg-[#14151b]/95 backdrop-blur-xl border border-white/15 shadow-2xl shadow-black/80 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-emerald-500 text-black flex items-center justify-center text-xs font-bold font-mono">
+                  {selectedIds.size}
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-white">Selected</span>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    {formatBytes(selectedSize)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSelectAllFiltered}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-zinc-300 hover:text-white transition-all"
+                >
+                  {allVisibleSelected ? "Deselect" : "Select All"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openBatchDelete}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-rose-600/30 hover:shadow-rose-600/50 transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete ({selectedIds.size})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-all ml-1"
+                  title="Cancel selection"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Lightbox / Video Player Modal */}
       <AnimatePresence>
@@ -402,6 +677,15 @@ export const Vault: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openSingleDelete(selectedMedia)}
+                    className="h-9 px-3 rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30 font-bold text-xs flex items-center gap-1.5 transition-all"
+                    title="Delete this file"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Delete</span>
+                  </button>
+
                   <a
                     href={getMediaFileUrl(selectedMedia.id)}
                     download={selectedMedia.filename}
@@ -410,6 +694,7 @@ export const Vault: React.FC = () => {
                     <Download className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Save File</span>
                   </a>
+
                   <button
                     onClick={() => setSelectedMedia(null)}
                     className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-zinc-300 hover:text-white flex items-center justify-center transition-all"
@@ -454,6 +739,104 @@ export const Vault: React.FC = () => {
                   </a>
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!isDeleting) setDeleteTarget(null);
+              }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+
+            {/* Dialog Card */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative z-10 w-full max-w-md bg-[#161720] border border-white/15 rounded-3xl p-6 shadow-2xl text-left"
+            >
+              <div className="flex items-center gap-3.5 mb-4">
+                <div className="w-11 h-11 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 flex-shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    {deleteTarget.type === "single"
+                      ? "Delete Media File?"
+                      : `Delete ${deleteTarget.count} Media Files?`}
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    This action will permanently remove the file(s) from disk.
+                  </p>
+                </div>
+              </div>
+
+              {deleteTarget.type === "single" ? (
+                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-5">
+                  <p className="text-xs font-semibold text-white truncate">
+                    {deleteTarget.item.filename}
+                  </p>
+                  <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
+                    Size: {formatBytes(deleteTarget.item.sizeBytes)}
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-5">
+                  <p className="text-xs font-semibold text-white">
+                    {deleteTarget.count} files selected for permanent deletion
+                  </p>
+                  <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
+                    Total disk space to free: {formatBytes(deleteTarget.totalBytes)}
+                  </p>
+                </div>
+              )}
+
+              {deleteError && (
+                <div className="mb-4 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-medium">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => setDeleteTarget(null)}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-zinc-300 hover:text-white transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={confirmDelete}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-rose-600/30 hover:shadow-rose-600/50 transition-all disabled:opacity-50"
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Permanently</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

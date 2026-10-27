@@ -113,3 +113,27 @@ export async function recoverMedia(id: string): Promise<Job> {
   if (!res.ok) throw new Error('Failed to recover media')
   return res.json()
 }
+
+export async function deleteMedia(id: string): Promise<{ success: boolean; id: string }> {
+  const res = await fetch(`${API_BASE}/media/${id}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'Failed to delete media' }))
+    throw new Error(err.message || 'Failed to delete media')
+  }
+  return res.json()
+}
+
+export async function batchDeleteMedia(ids: string[]): Promise<{ success: boolean; deleted: string[]; failed: string[]; total: number }> {
+  const res = await fetch(`${API_BASE}/media/batch-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'Failed to delete selected media' }))
+    throw new Error(err.message || 'Failed to delete selected media')
+  }
+  return res.json()
+}

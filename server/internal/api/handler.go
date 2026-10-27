@@ -96,6 +96,8 @@ func (h *Handler) registerRoutes() {
 	h.mux.Handle("GET /api/v1/vault", h.requireAuth(http.HandlerFunc(h.handleListVault)))
 	h.mux.Handle("POST /api/v1/vault/{id}/recover", h.requireAuth(http.HandlerFunc(h.handleRecoverMedia)))
 	h.mux.Handle("GET /api/v1/media/{id}", h.requireAuth(http.HandlerFunc(h.handleGetMedia)))
+	h.mux.Handle("DELETE /api/v1/media/{id}", h.requireAuth(http.HandlerFunc(h.handleDeleteMedia)))
+	h.mux.Handle("POST /api/v1/media/batch-delete", h.requireAuth(http.HandlerFunc(h.handleBatchDeleteMedia)))
 	
 	// API v1 (Public - ULID acts as capability token)
 	h.mux.HandleFunc("GET /api/v1/media/{id}/file", h.handleGetMediaFile)
