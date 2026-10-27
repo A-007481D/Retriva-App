@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/A-007481D/retriva/server/internal/database"
@@ -17,6 +19,7 @@ import (
 	"github.com/A-007481D/retriva/server/internal/jobs"
 	"github.com/A-007481D/retriva/server/internal/media"
 	"github.com/A-007481D/retriva/server/internal/resolver"
+	"github.com/A-007481D/retriva/server/internal/security"
 	"github.com/A-007481D/retriva/server/internal/storage"
 	"github.com/oklog/ulid/v2"
 )
@@ -96,6 +99,7 @@ func (h *Handler) registerRoutes() {
 	
 	// API v1 (Public - ULID acts as capability token)
 	h.mux.HandleFunc("GET /api/v1/media/{id}/file", h.handleGetMediaFile)
+	h.mux.HandleFunc("GET /api/v1/proxy", h.handleImageProxy)
 
 	// Serve static frontend files (SPA fallback to index.html)
 	candidates := []string{
@@ -289,4 +293,56 @@ func (rw *responseWriter) WriteHeader(status int) {
 		rw.written = true
 		rw.ResponseWriter.WriteHeader(status)
 	}
+}
+
+func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	rawURL := strings.TrimSpace(r.URL.Query().Get("url"))
+	if rawURL == "" {
+		http.Error(w, "missing url parameter", http.StatusBadRequest)
+		return
+	}
+
+	parsed, err := security.ValidateURL(r.Context(), rawURL)
+	if err != nil {
+		http.Error(w, "invalid url", http.StatusBadRequest)
+		return
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		http.Error(w, "failed to create request", http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	req.Header.Set("Referer", "https://www.instagram.com/")
+
+	client := security.SafeHTTPClient(15*time.Second, 5)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "failed to fetch image", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, fmt.Sprintf("upstream returned %d", resp.StatusCode), resp.StatusCode)
+		return
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+		w.Header().Set("Content-Length", contentLength)
+	}
+
+	_, _ = io.Copy(w, resp.Body)
 }

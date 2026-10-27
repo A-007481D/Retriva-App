@@ -215,7 +215,11 @@ export const Home: React.FC = () => {
                 id: String(it.id || it.index),
                 type: it.type || (it.duration ? "video" : "photo"),
                 title: it.title || `Item #${it.index}`,
-                thumbnail: it.thumbnail,
+                thumbnail: it.thumbnail
+                  ? it.thumbnail.startsWith("http")
+                    ? `/api/v1/proxy?url=${encodeURIComponent(it.thumbnail)}`
+                    : it.thumbnail
+                  : undefined,
                 duration: it.duration ? `${Math.round(it.duration)}s` : undefined,
               }));
               setPreviewItems(items);

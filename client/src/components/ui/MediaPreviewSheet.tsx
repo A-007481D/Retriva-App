@@ -26,6 +26,12 @@ interface MediaPreviewSheetProps {
   onDownload: () => void;
 }
 
+const getProxiedThumb = (thumb?: string) => {
+  if (!thumb) return "";
+  if (thumb.startsWith("/api/v1/proxy") || thumb.startsWith("/")) return thumb;
+  return `/api/v1/proxy?url=${encodeURIComponent(thumb)}`;
+};
+
 export const MediaPreviewSheet: React.FC<MediaPreviewSheetProps> = ({
   isOpen,
   onClose,
@@ -222,20 +228,26 @@ export const MediaPreviewSheet: React.FC<MediaPreviewSheetProps> = ({
                         }`}
                         onClick={() => onToggleSelect(item.id)}
                       >
-                        {item.thumbnail ? (
+                        {/* Background placeholder / skeleton */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-[#131622] to-slate-950 flex items-center justify-center">
+                          {isVideo ? (
+                            <Video className="w-8 h-8 text-white/10" />
+                          ) : (
+                            <ImageIcon className="w-8 h-8 text-white/10" />
+                          )}
+                        </div>
+
+                        {item.thumbnail && (
                           <img
-                            src={item.thumbnail}
+                            src={getProxiedThumb(item.thumbnail)}
                             alt={item.title}
-                            referrerPolicy="no-referrer"
-                            crossOrigin="anonymous"
+                            loading="lazy"
                             className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
                             style={{ opacity: isSelected ? 0.95 : 0.7 }}
                             onError={(e) => {
                               (e.target as HTMLElement).style.display = "none";
                             }}
                           />
-                        ) : (
-                          <div className="absolute inset-0 bg-gradient-to-br from-teal-900/30 via-slate-900 to-indigo-950/40" />
                         )}
 
                         {/* Dark gradient overlay for text readability */}
