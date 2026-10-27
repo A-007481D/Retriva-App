@@ -468,14 +468,16 @@ func (r *Resolver) fetchUserReel(ctx context.Context, username, storyID string) 
 	}
 
 	userID := ""
-	// 1. If we have a storyID, try to query media info
+	// 1. If we have a storyID, try to query media info directly
 	if storyID != "" {
 		if item, err := r.fetchMediaInfo(ctx, storyID); err == nil && item != nil {
-			if string(item.User.PK) != "" {
-				userID = string(item.User.PK)
-			} else if item.User.Username != "" {
-				username = item.User.Username
+			reel := &igReel{
+				ID: storyID,
+				Items: []igItem{*item},
 			}
+			reel.User.Username = item.User.Username
+			reel.User.FullName = item.User.FullName
+			return reel, nil
 		}
 	}
 

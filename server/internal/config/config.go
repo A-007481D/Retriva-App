@@ -143,14 +143,48 @@ func Load() (*Config, error) {
 	cfg.YtDlpPath = ytDlpPath
 
 	defaultCookies := ""
-	for _, candidate := range []string{"data/cookies.txt", "../data/cookies.txt", "server/cookies.txt", "../server/cookies.txt", "cookies.txt", "/data/cookies.txt"} {
-		if _, err := os.Stat(candidate); err == nil {
-			if abs, err := filepath.Abs(candidate); err == nil {
-				defaultCookies = abs
-			} else {
-				defaultCookies = candidate
+	var candidates []string
+
+	// Check user Downloads directory for newly exported browser cookies
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		downloads := filepath.Join(home, "Downloads")
+		if matches, err := filepath.Glob(filepath.Join(downloads, "*cookie*.txt")); err == nil {
+			candidates = append(candidates, matches...)
+		}
+	}
+
+	candidates = append(candidates,
+		"data/cookies.txt",
+		"../data/cookies.txt",
+		"server/cookies.txt",
+		"../server/cookies.txt",
+		"cookies.txt",
+		"/data/cookies.txt",
+	)
+
+	var newestFile string
+	var newestTime time.Time
+	for _, cand := range candidates {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			if newestFile == "" || fi.ModTime().After(newestTime) {
+				newestFile = cand
+				newestTime = fi.ModTime()
 			}
-			break
+		}
+	}
+
+	if newestFile != "" {
+		if abs, err := filepath.Abs(newestFile); err == nil {
+			defaultCookies = abs
+		} else {
+			defaultCookies = newestFile
+		}
+		// If the newest cookies file was found in Downloads, automatically mirror it into data/cookies.txt
+		if strings.Contains(defaultCookies, "Downloads") {
+			if content, err := os.ReadFile(defaultCookies); err == nil && len(content) > 0 {
+				_ = os.MkdirAll("data", 0755)
+				_ = os.WriteFile("data/cookies.txt", content, 0644)
+			}
 		}
 	}
 	cfg.YtDlpCookies = envStr("RETRIVA_YTDLP_COOKIES", defaultCookies)
